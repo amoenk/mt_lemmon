@@ -1,0 +1,877 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { deepSkyObjects } from '../data/deepSkyObjects';
+import { solarSystemObjects } from '../data/solarSystemObjects';
+import { 
+  getMoonPhase, 
+  calculateAltitude,
+  raToDecimal,
+  decToDecimal,
+  MT_LEMMON_LOCATION,
+  getPlanetPosition,
+  calculateObjectTimings,
+  getExposureRecommendations
+} from '../utils/astronomy';
+import { SimpleGanttChart } from './SimpleGanttChart';
+import { FilterControls } from './FilterControls';
+import { ObservationTable } from './ObservationTable';
+
+export const ObservationPlanner: React.FC = () => {
+  // Check URL params first, then localStorage, then defaults
+  const loadSettingWithUrlParam = <T,>(key: string, urlParam: string, defaultValue: T): T => {
+    // Check URL params first
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlValue = urlParams.get(urlParam);
+    if (urlValue !== null) {
+      try {
+        if (typeof defaultValue === 'number') {
+          return Number(urlValue) as T;
+        }
+        return urlValue as T;
+      } catch {
+        // Fall through to localStorage
+      }
+    }
+    
+    // Then check localStorage
+    const stored = localStorage.getItem(key);
+    if (stored !== null) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return defaultValue;
+      }
+    }
+    return defaultValue;
+  };
+
+  // Load settings from URL params if present
+  const loadSettingsFromUrl = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const settings = urlParams.get('s');
+    if (settings) {
+      try {
+        // Decode from base64
+        const json = decodeURIComponent(atob(settings));
+        const parsed = JSON.parse(json);
+        
+        // Validate version
+        if (parsed.v === 1) {
+          return {
+            selectedDate: parsed.d || '2026-03-20',
+            startTime: parsed.st || '22:00',
+            endTime: parsed.et || '06:00',
+            minAltitude: parsed.ma || 15,
+            hiddenObjects: new Set<string>(parsed.h || []),
+            customSettings: parsed.cs || {}
+          };
+        }
+      } catch (error) {
+        console.error('Failed to parse URL settings:', error);
+      }
+    }
+    return null;
+  };
+
+  const urlSettings = loadSettingsFromUrl();
+
+  const [selectedDate, setSelectedDate] = useState<string>(() => 
+    urlSettings?.selectedDate || loadSettingWithUrlParam('observationDate', 'date', '2026-03-20')
+  );
+  const [startTime, setStartTime] = useState<string>(() => 
+    urlSettings?.startTime || loadSettingWithUrlParam('startTime', 'start', '22:00')
+  );
+  const [endTime, setEndTime] = useState<string>(() => 
+    urlSettings?.endTime || loadSettingWithUrlParam('endTime', 'end', '06:00')
+  );
+  const [minAltitude, setMinAltitude] = useState<number>(() =>
+    urlSettings?.minAltitude || loadSettingWithUrlParam('minAltitude', 'alt', 15)
+  );
+  const [isNightMode, setIsNightMode] = useState<boolean>(false);
+  const [showDeepSky, setShowDeepSky] = useState<boolean>(true);
+  const [showSolarSystem, setShowSolarSystem] = useState<boolean>(true);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [disabledObjects, setDisabledObjects] = useState<Set<string>>(() => {
+    if (urlSettings?.hiddenObjects) {
+      return urlSettings.hiddenObjects;
+    }
+    const stored = localStorage.getItem('disabledObjects');
+    return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+  });
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importValue, setImportValue] = useState('');
+  const [exportValue, setExportValue] = useState('');
+  const [shareableLink, setShareableLink] = useState('');
+  const [copiedButton, setCopiedButton] = useState<'code' | 'link' | null>(null);
+
+  interface CustomObjectSettings {
+    imagingTime?: number; // minutes
+    filters?: string[];
+    priority?: number; // 1-10
+  }
+  
+  const [customSettings, setCustomSettings] = useState<Record<string, CustomObjectSettings>>(() => {
+    if (urlSettings?.customSettings) {
+      return urlSettings.customSettings;
+    }
+    const stored = localStorage.getItem('customObjectSettings');
+    return stored ? JSON.parse(stored) : {};
+  });
+
+  // Clear URL params after loading to keep URL clean
+  useEffect(() => {
+    if (urlSettings) {
+      // Settings were loaded from URL, clean it up
+      const url = new URL(window.location.href);
+      url.searchParams.delete('s');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []); // Empty dependency array ensures this runs only once on mount
+
+  // Save settings to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('observationDate', JSON.stringify(selectedDate));
+  }, [selectedDate]);
+
+  useEffect(() => {
+    localStorage.setItem('startTime', JSON.stringify(startTime));
+  }, [startTime]);
+
+  useEffect(() => {
+    localStorage.setItem('endTime', JSON.stringify(endTime));
+  }, [endTime]);
+
+  useEffect(() => {
+    localStorage.setItem('minAltitude', JSON.stringify(minAltitude));
+  }, [minAltitude]);
+
+  useEffect(() => {
+    localStorage.setItem('disabledObjects', JSON.stringify(Array.from(disabledObjects)));
+  }, [disabledObjects]);
+
+  useEffect(() => {
+    localStorage.setItem('customObjectSettings', JSON.stringify(customSettings));
+  }, [customSettings]);
+
+  useEffect(() => {
+    if (isNightMode) {
+      document.body.classList.add('night-mode');
+    } else {
+      document.body.classList.remove('night-mode');
+    }
+  }, [isNightMode]);
+
+  const observationDate = useMemo(() => {
+    try {
+      // Create date in MST/Arizona time (UTC-7, no DST)
+      // We append the timezone offset to ensure consistent interpretation
+      const dateTimeString = `${selectedDate}T${startTime}:00-07:00`;
+      const date = new Date(dateTimeString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        const fallback = new Date();
+        fallback.setHours(22, 0, 0, 0); // Default to 22:00
+        return fallback;
+      }
+      
+      return date;
+    } catch (error) {
+      const fallback = new Date();
+      fallback.setHours(22, 0, 0, 0);
+      return fallback;
+    }
+  }, [selectedDate, startTime]);
+  
+  const observationEndDate = useMemo(() => {
+    try {
+      // Handle end time, accounting for next-day rollover
+      const [hours] = endTime.split(':').map(Number);
+      const endDateString = hours < 12 
+        ? `${selectedDate}T${endTime}:00-07:00` // Next day (after midnight)
+        : `${selectedDate}T${endTime}:00-07:00`; // Same day
+      
+      let date = new Date(endDateString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        const fallback = new Date(observationDate);
+        fallback.setDate(fallback.getDate() + 1);
+        fallback.setHours(6, 0, 0, 0); // Default to 06:00 next day
+        return fallback;
+      }
+      
+      if (hours < 12) {
+        // Add one day if end time is after midnight
+        date.setDate(date.getDate() + 1);
+      }
+      
+      return date;
+    } catch (error) {
+      const fallback = new Date(observationDate);
+      fallback.setDate(fallback.getDate() + 1);
+      fallback.setHours(6, 0, 0, 0);
+      return fallback;
+    }
+  }, [selectedDate, endTime, observationDate]);
+  
+  const moonInfo = useMemo(() => getMoonPhase(observationDate), [observationDate]);
+  
+  const allObjects = useMemo(() => {
+    const deepSky = showDeepSky ? deepSkyObjects.map(obj => {
+      const ra = raToDecimal(obj.ra);
+      const dec = decToDecimal(obj.dec);
+      const currentAlt = calculateAltitude(ra, dec, observationDate, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
+      const timings = calculateObjectTimings(ra, dec, observationDate, minAltitude);
+      
+      const exposure = getExposureRecommendations(obj.type, obj.magnitude);
+      
+      // Use custom settings if available
+      const objectCustomSettings = customSettings[obj.name];
+      const activeFilters = objectCustomSettings?.filters || exposure.filters;
+      const customImagingTime = objectCustomSettings?.imagingTime;
+      
+      const setupTime = 10; // Standard setup time for all objects
+      const exposuresPerFilter = 10;
+      const downloadTime = 0.5;
+      
+      // Use custom imaging time if set, otherwise calculate from exposure recommendations
+      const totalObservationTime = customImagingTime || 
+        ((exposure.exposureTime * exposuresPerFilter * activeFilters.length) / 60 
+         + (downloadTime * exposuresPerFilter * activeFilters.length)
+         + setupTime);
+      
+      // Check if object is visible during our observation window
+      let isVisible = false;
+      if (!timings.neverRises && timings.transitAltitude >= minAltitude) {
+        // Object can rise above minimum altitude, but is it visible during our window?
+        if (timings.isCircumpolar) {
+          // Always visible
+          isVisible = true;
+        } else if (timings.riseTime && timings.setTime) {
+          // Check if the object is above minAltitude during our observation window
+          const obsStart = observationDate.getTime();
+          const obsEnd = observationEndDate.getTime();
+          const riseTime = timings.riseTime.getTime();
+          const setTime = timings.setTime.getTime();
+          
+          // Object is visible if it's up during any part of our window
+          isVisible = (riseTime <= obsEnd && setTime >= obsStart);
+        }
+      }
+      
+      
+      const priorityMap: { [key: string]: number } = {
+        'must_have': 10,
+        'high': 8,
+        'medium': 5,
+        'low': 3
+      };
+      const defaultPriority = priorityMap[obj.priority] || 5;
+      const priorityValue = objectCustomSettings?.priority || defaultPriority;
+      
+      let observationScore = 0;
+      if (isVisible && timings.transitTime) {
+        const minutesFromTransit = Math.abs(timings.transitTime.getTime() - observationDate.getTime()) / (1000 * 60);
+        const timeScore = Math.max(0, 100 - (minutesFromTransit / 60) * 10);
+        const altScore = Math.min(100, (timings.transitAltitude / 90) * 100);
+        const flexibilityScore = 100 - Math.min(80, totalObservationTime * 0.5);
+        
+        observationScore = ((timeScore * 0.4 + altScore * 0.3 + flexibilityScore * 0.3) * (priorityValue / 5));
+      }
+      
+      const observableDuration = timings.setTime && timings.riseTime 
+        ? (timings.setTime.getTime() - timings.riseTime.getTime()) / 60000
+        : 0;
+      
+      return {
+        id: obj.name,
+        name: obj.name,
+        commonName: obj.commonName,
+        type: obj.type,
+        priority: priorityValue,
+        defaultPriority,
+        magnitude: obj.magnitude,
+        size: obj.size,
+        currentAltitude: currentAlt,
+        timings,
+        exposure,
+        activeFilters,
+        customImagingTime,
+        isVisible,
+        totalObservationTime,
+        observationScore,
+        observableDuration
+      };
+    }) : [];
+
+    const planets = showSolarSystem ? solarSystemObjects.filter(obj => obj.type === 'planet').map(planet => {
+      const position = getPlanetPosition(planet.name, observationDate);
+      
+      if (position) {
+        const timings = calculateObjectTimings(position.ra, position.dec, observationDate, minAltitude);
+        const exposure = getExposureRecommendations('planet');
+        
+        // Use custom settings if available
+        const objectCustomSettings = customSettings[planet.name];
+        const activeFilters = objectCustomSettings?.filters || exposure.filters;
+        const customImagingTime = objectCustomSettings?.imagingTime;
+        
+        const setupTime = 10; // Consistent setup time
+        const captureTime = 10;
+        
+        // Use custom imaging time if set, otherwise calculate from active filters
+        const totalObservationTime = customImagingTime || 
+          ((captureTime * activeFilters.length) + setupTime);
+        
+        const isVisible = timings.transitAltitude >= minAltitude;
+        
+        const priorityMap: { [key: string]: number } = {
+          'must_have': 10,
+          'high': 8,
+          'medium': 5,
+          'low': 3
+        };
+        const defaultPriority = priorityMap[planet.priority] || 5;
+        const priorityValue = objectCustomSettings?.priority || defaultPriority;
+        
+        let observationScore = 0;
+        if (isVisible && timings.transitTime) {
+          const minutesFromTransit = Math.abs(timings.transitTime.getTime() - observationDate.getTime()) / (1000 * 60);
+          const timeScore = Math.max(0, 100 - (minutesFromTransit / 60) * 10);
+          const altScore = Math.min(100, (timings.transitAltitude / 90) * 100);
+          const flexibilityScore = 100 - Math.min(80, totalObservationTime * 0.5);
+          
+          observationScore = ((timeScore * 0.4 + altScore * 0.3 + flexibilityScore * 0.3) * (priorityValue / 5));
+        }
+        
+        const observableDuration = timings.setTime && timings.riseTime 
+          ? (timings.setTime.getTime() - timings.riseTime.getTime()) / 60000
+          : 0;
+        
+        return {
+          id: planet.name,
+          name: planet.name,
+          type: 'planet',
+          priority: priorityValue,
+          defaultPriority,
+          size: undefined,
+          currentAltitude: position.altitude,
+          timings,
+          exposure,
+          activeFilters,
+          customImagingTime,
+          isVisible,
+          totalObservationTime,
+          observationScore,
+          observableDuration
+        };
+      }
+      return null;
+    }).filter((item): item is NonNullable<typeof item> => item !== null) : [];
+
+    const combined = [...deepSky, ...planets];
+    
+    return combined.sort((a, b) => {
+      // First, separate visible from non-visible
+      if (a.isVisible !== b.isVisible) {
+        return a.isVisible ? -1 : 1;
+      }
+      
+      // Sort by transit time (earlier transits first)
+      const aTransitTime = a.timings.transitTime?.getTime() || Number.MAX_SAFE_INTEGER;
+      const bTransitTime = b.timings.transitTime?.getTime() || Number.MAX_SAFE_INTEGER;
+      
+      return aTransitTime - bTransitTime;
+    });
+  }, [observationDate, minAltitude, showDeepSky, showSolarSystem, customSettings]);
+
+  const visibleObjects = allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id));
+
+  // Schedule observations based on priority and availability
+  const scheduledObservations = useMemo(() => {
+    const scheduled: Array<{
+      objectId: string;
+      startTime: Date;
+      endTime: Date;
+      setupTime: number; // minutes
+      imagingTime: number; // minutes
+    }> = [];
+    
+    let currentTime = new Date(observationDate);
+    const windowEnd = new Date(observationEndDate);
+    let isFirstObject = true;
+    
+    // Go through objects in priority order
+    for (const obj of visibleObjects) {
+      if (currentTime >= windowEnd) break;
+      
+      // Add 5 minute setup between objects (but not before the first one)
+      if (!isFirstObject) {
+        currentTime = new Date(currentTime.getTime() + 5 * 60 * 1000); // Add 5 minutes between objects
+        if (currentTime >= windowEnd) break;
+      }
+      
+      // Check if object is observable at current time
+      const ra = obj.type === 'planet' 
+        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, currentTime)?.ra : 0)
+        : raToDecimal(deepSkyObjects.find(d => d.name === obj.name)?.ra || {hours: 0, minutes: 0, seconds: 0});
+      const dec = obj.type === 'planet'
+        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, currentTime)?.dec : 0)
+        : decToDecimal(deepSkyObjects.find(d => d.name === obj.name)?.dec || {degrees: 0, minutes: 0, seconds: 0});
+      
+      if (!ra || !dec) continue;
+      
+      const altitude = calculateAltitude(ra, dec, currentTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
+      
+      // Skip if object is too low
+      if (altitude < minAltitude) continue;
+      
+      // Calculate observation duration
+      // For first object, include setup. For subsequent objects, setup was already added above
+      const setupTime = 5; // 5 minutes setup/slew/focus
+      const imagingTimeOnly = Math.round((obj.totalObservationTime || 70) - 10); // Still subtract 10 from total since that's built into the object's time
+      const totalTime = imagingTimeOnly; // Just the imaging time, setup already accounted for
+      
+      // Check if observation would extend beyond window end
+      const proposedEndTime = new Date(currentTime.getTime() + totalTime * 60 * 1000);
+      if (proposedEndTime > windowEnd) {
+        // Skip this object entirely - don't do partial observations
+        continue;
+      }
+      
+      // Check if object will remain visible for the duration
+      const endAltitude = calculateAltitude(ra, dec, proposedEndTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
+      
+      if (endAltitude < minAltitude) {
+        // Object will set during observation, skip for now
+        continue;
+      }
+      
+      // Schedule this observation
+      scheduled.push({
+        objectId: obj.id,
+        startTime: new Date(currentTime),
+        endTime: proposedEndTime,
+        setupTime: isFirstObject ? 0 : setupTime, // No setup for first object, it's at start of session
+        imagingTime: imagingTimeOnly
+      });
+      
+      // Move current time forward
+      currentTime = proposedEndTime;
+      isFirstObject = false;
+    }
+    
+    return scheduled;
+  }, [visibleObjects, observationDate, observationEndDate, minAltitude]);
+
+  // Automatically enable objects that get scheduled
+  useEffect(() => {
+    const scheduledIds = new Set(scheduledObservations.map(s => s.objectId));
+    
+    setDisabledObjects(prevDisabled => {
+      const newDisabled = new Set(prevDisabled);
+      let hasChanges = false;
+      
+      // Check if any scheduled objects are disabled
+      for (const scheduledId of scheduledIds) {
+        if (newDisabled.has(scheduledId)) {
+          newDisabled.delete(scheduledId);
+          hasChanges = true;
+        }
+      }
+      
+      // Return new set if changes were made, otherwise return original
+      return hasChanges ? newDisabled : prevDisabled;
+    });
+  }, [scheduledObservations]);
+
+  const toggleExpanded = (id: string) => {
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedRows(newExpanded);
+  };
+
+  const toggleObjectEnabled = (id: string) => {
+    const newDisabled = new Set(disabledObjects);
+    if (newDisabled.has(id)) {
+      newDisabled.delete(id);
+    } else {
+      newDisabled.add(id);
+    }
+    setDisabledObjects(newDisabled);
+  };
+
+  const updateObjectSettings = (objectId: string, settings: CustomObjectSettings) => {
+    setCustomSettings(prev => ({
+      ...prev,
+      [objectId]: settings
+    }));
+  };
+
+  const handleExport = () => {
+    const settings = {
+      v: 1, // version
+      d: selectedDate,
+      st: startTime,
+      et: endTime,
+      ma: minAltitude,
+      h: Array.from(disabledObjects),
+      cs: customSettings
+    };
+    
+    // Compress to base64
+    const json = JSON.stringify(settings);
+    const compressed = btoa(encodeURIComponent(json));
+    
+    // Add prefix to identify it as our settings
+    const exportString = `MTLEMMON:${compressed}`;
+    setExportValue(exportString);
+    
+    // Generate shareable link
+    const url = new URL(window.location.href);
+    url.searchParams.set('s', compressed);
+    setShareableLink(url.toString());
+    
+    setShowExportModal(true);
+  };
+
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState(false);
+
+  const handleImport = () => {
+    try {
+      const importString = importValue.trim();
+      
+      // Check prefix
+      if (!importString.startsWith('MTLEMMON:')) {
+        setImportError('Invalid import string. Make sure you copied the entire code.');
+        setTimeout(() => setImportError(null), 3000);
+        return;
+      }
+      
+      // Decode
+      const compressed = importString.slice(9); // Remove 'MTLEMMON:' prefix
+      const json = decodeURIComponent(atob(compressed));
+      const settings = JSON.parse(json);
+      
+      // Validate version
+      if (settings.v !== 1) {
+        setImportError('Unsupported settings version');
+        setTimeout(() => setImportError(null), 3000);
+        return;
+      }
+      
+      // Apply settings
+      setSelectedDate(settings.d || '2026-03-20');
+      setStartTime(settings.st || '22:00');
+      setEndTime(settings.et || '06:00');
+      setMinAltitude(settings.ma || 15);
+      setDisabledObjects(new Set(settings.h || []));
+      setCustomSettings(settings.cs || {});
+      
+      setImportSuccess(true);
+      setTimeout(() => {
+        setShowImportModal(false);
+        setImportValue('');
+        setImportSuccess(false);
+      }, 1500);
+    } catch (error) {
+      console.error('Failed to import settings:', error);
+      setImportError('Failed to import settings. Please check the code and try again.');
+      setTimeout(() => setImportError(null), 3000);
+    }
+  };
+
+  const resetSettings = () => {
+    // Clear all localStorage
+    localStorage.removeItem('observationDate');
+    localStorage.removeItem('startTime');
+    localStorage.removeItem('endTime');
+    localStorage.removeItem('minAltitude');
+    localStorage.removeItem('disabledObjects');
+    localStorage.removeItem('customObjectSettings');
+    
+    // Reset to defaults
+    setSelectedDate('2026-03-20');
+    setStartTime('22:00');
+    setEndTime('06:00');
+    setMinAltitude(15);
+    setDisabledObjects(new Set());
+    setCustomSettings({});
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950">
+      <header className="bg-black/50 backdrop-blur-sm border-b border-gray-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="text-2xl">🔭</div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                Mt. Lemmon Sky Center - 32" Telescope
+              </h1>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={handleExport}
+                className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                title="Export settings to shareable code"
+              >
+                <span>📤</span>
+                <span className="text-sm font-medium">Export</span>
+              </button>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                title="Import settings from code"
+              >
+                <span>📥</span>
+                <span className="text-sm font-medium">Import</span>
+              </button>
+              <button
+                onClick={resetSettings}
+                className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                title="Reset all settings to defaults"
+              >
+                <span>↺</span>
+                <span className="text-sm font-medium">Reset</span>
+              </button>
+              <button
+                onClick={() => setIsNightMode(!isNightMode)}
+                className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                  isNightMode 
+                    ? 'bg-red-900/30 text-red-400 border border-red-800 hover:bg-red-900/50' 
+                    : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
+                }`}
+              >
+                <span>{isNightMode ? '🔴' : '🌙'}</span>
+                <span className="text-sm font-medium">
+                  {isNightMode ? 'Night Vision' : 'Normal Mode'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Gantt Chart - Now at the top */}
+        {visibleObjects.length > 0 && (
+          <SimpleGanttChart
+            observations={visibleObjects}
+            startTime={observationDate}
+            endTime={observationEndDate}
+            expandedRows={expandedRows}
+            scheduledObservations={scheduledObservations}
+          />
+        )}
+
+        {/* Filter Controls */}
+        <FilterControls
+          observationDate={selectedDate}
+          startTime={startTime}
+          endTime={endTime}
+          minAltitude={minAltitude}
+          showDeepSky={showDeepSky}
+          showSolarSystem={showSolarSystem}
+          nightMode={isNightMode}
+          onDateChange={setSelectedDate}
+          onStartTimeChange={setStartTime}
+          onEndTimeChange={setEndTime}
+          onMinAltitudeChange={setMinAltitude}
+          onShowDeepSkyChange={setShowDeepSky}
+          onShowSolarSystemChange={setShowSolarSystem}
+          onNightModeChange={setIsNightMode}
+        />
+
+        {/* Conditions Info */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-gray-900 p-4 rounded-lg">
+            <div className="flex items-center space-x-2 mb-2">
+              <span className="text-2xl">📍</span>
+              <h3 className="font-semibold">Location</h3>
+            </div>
+            <p className="text-sm text-gray-400">Mt. Lemmon Sky Center</p>
+            <p className="text-xs text-gray-500">32.44°N, 110.79°W • 2,791m</p>
+            <p className="text-xs text-gray-500">MST (UTC-7, no DST)</p>
+          </div>
+          
+          <div className="bg-gray-900 p-4 rounded-lg">
+            <div className="flex items-center space-x-2 mb-2">
+              <span className="text-2xl">🌙</span>
+              <h3 className="font-semibold">Moon Phase</h3>
+            </div>
+            <p className="text-sm text-gray-400">{moonInfo.phase}</p>
+            <p className="text-xs text-gray-500">{moonInfo.illumination.toFixed(0)}% illuminated</p>
+          </div>
+          
+          <div className="bg-gray-900 p-4 rounded-lg">
+            <div className="flex items-center space-x-2 mb-2">
+              <span className="text-2xl">✨</span>
+              <h3 className="font-semibold">Observable</h3>
+            </div>
+            <p className="text-2xl font-bold text-blue-400">{visibleObjects.length}</p>
+            <p className="text-xs text-gray-500">
+              of {allObjects.length} objects visible
+            </p>
+          </div>
+        </div>
+
+        {/* Observation Table */}
+        <ObservationTable
+          observations={allObjects}
+          expandedRows={expandedRows}
+          scheduledObservations={scheduledObservations}
+          disabledObjects={disabledObjects}
+          customSettings={customSettings}
+          onToggleExpanded={toggleExpanded}
+          onToggleEnabled={toggleObjectEnabled}
+          onUpdateSettings={updateObjectSettings}
+        />
+      </div>
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-3xl w-full">
+            <h2 className="text-xl font-bold mb-4">Export Settings</h2>
+            
+            {/* Export Code Section */}
+            <div className="mb-6">
+              <p className="text-sm text-gray-400 mb-2">
+                Import Code (paste this into the import dialog):
+              </p>
+              <textarea
+                value={exportValue}
+                readOnly
+                className="w-full h-24 p-3 bg-gray-800 border border-gray-700 rounded text-sm font-mono"
+                onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(exportValue);
+                  setCopiedButton('code');
+                  setTimeout(() => {
+                    setCopiedButton(null);
+                    setShowExportModal(false);
+                    setShareableLink('');
+                  }, 1500);
+                }}
+                className={`mt-2 px-3 py-1 text-sm rounded transition-all ${
+                  copiedButton === 'code' 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {copiedButton === 'code' ? 'Copied ✓' : 'Copy Import Code'}
+              </button>
+            </div>
+            
+            {/* Shareable Link Section */}
+            <div className="mb-4">
+              <p className="text-sm text-gray-400 mb-2">
+                Shareable Link (opens directly with your settings):
+              </p>
+              <textarea
+                value={shareableLink}
+                readOnly
+                className="w-full h-16 p-3 bg-gray-800 border border-gray-700 rounded text-sm font-mono"
+                onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(shareableLink);
+                  setCopiedButton('link');
+                  setTimeout(() => {
+                    setCopiedButton(null);
+                    setShowExportModal(false);
+                    setShareableLink('');
+                  }, 1500);
+                }}
+                className={`mt-2 px-3 py-1 text-sm rounded transition-all ${
+                  copiedButton === 'link' 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {copiedButton === 'link' ? 'Copied ✓' : 'Copy Link'}
+              </button>
+            </div>
+            
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowExportModal(false);
+                  setShareableLink('');
+                  setCopiedButton(null);
+                }}
+                className="px-4 py-2 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-2xl w-full">
+            <h2 className="text-xl font-bold mb-4">Import Settings</h2>
+            <p className="text-sm text-gray-400 mb-4">
+              Paste a settings code below to import:
+            </p>
+            <textarea
+              value={importValue}
+              onChange={(e) => setImportValue(e.target.value)}
+              placeholder="Paste MTLEMMON:... code here"
+              className="w-full h-32 p-3 bg-gray-800 border border-gray-700 rounded text-sm font-mono placeholder-gray-500"
+              autoFocus
+            />
+            {importError && (
+              <div className="mt-2 p-2 bg-red-900/30 border border-red-700 rounded text-red-400 text-sm">
+                {importError}
+              </div>
+            )}
+            {importSuccess && (
+              <div className="mt-2 p-2 bg-green-900/30 border border-green-700 rounded text-green-400 text-sm">
+                Settings imported successfully! ✓
+              </div>
+            )}
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={handleImport}
+                disabled={importSuccess}
+                className={`px-4 py-2 rounded transition-all ${
+                  importSuccess
+                    ? 'bg-green-600 text-white'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                {importSuccess ? 'Imported ✓' : 'Import'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportValue('');
+                  setImportError(null);
+                  setImportSuccess(false);
+                }}
+                className="px-4 py-2 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
