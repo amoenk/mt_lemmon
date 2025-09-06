@@ -104,7 +104,7 @@ export const ObservationPlanner: React.FC = () => {
   const [importValue, setImportValue] = useState('');
   const [exportValue, setExportValue] = useState('');
   const [shareableLink, setShareableLink] = useState('');
-  const [copiedButton, setCopiedButton] = useState<'code' | 'link' | null>(null);
+  const [copiedButton, setCopiedButton] = useState<'code' | 'link' | 'list' | null>(null);
 
   interface CustomObjectSettings {
     imagingTime?: number; // minutes
@@ -819,6 +819,79 @@ export const ObservationPlanner: React.FC = () => {
                 }`}
               >
                 {copiedButton === 'code' ? 'Copied ✓' : 'Copy Import Code'}
+              </button>
+            </div>
+            
+            {/* Observation List Section */}
+            <div className="mb-4">
+              <p className="text-sm text-gray-400 mb-2">
+                Observation Plan (text format for sharing):
+              </p>
+              <textarea
+                value={(() => {
+                  const formatTime = (date: Date) => 
+                    date.toLocaleTimeString('en-US', { 
+                      hour12: false,
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      timeZone: 'America/Phoenix'
+                    });
+                  
+                  if (scheduledObservations.length === 0) {
+                    return 'No observations scheduled';
+                  }
+                  
+                  let list = `Observation Plan for ${selectedDate}\n`;
+                  list += `${formatTime(observationDate)} - ${formatTime(observationEndDate)} MST\n\n`;
+                  
+                  scheduledObservations.forEach((sched, idx) => {
+                    const obj = visibleObjects.find(o => o.id === sched.objectId);
+                    if (obj) {
+                      const name = obj.commonName ? `${obj.name} ${obj.commonName}` : obj.name;
+                      list += `${idx + 1}. ${formatTime(sched.startTime)} - ${formatTime(sched.endTime)}: ${name} (${Math.round(sched.imagingTime)}m)\n`;
+                    }
+                  });
+                  
+                  return list;
+                })()}
+                readOnly
+                className="w-full h-32 p-3 bg-gray-800 border border-gray-700 rounded text-sm font-mono"
+                onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+              />
+              <button
+                onClick={() => {
+                  const formatTime = (date: Date) => 
+                    date.toLocaleTimeString('en-US', { 
+                      hour12: false,
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      timeZone: 'America/Phoenix'
+                    });
+                  
+                  let list = `Observation Plan for ${selectedDate}\n`;
+                  list += `${formatTime(observationDate)} - ${formatTime(observationEndDate)} MST\n\n`;
+                  
+                  scheduledObservations.forEach((sched, idx) => {
+                    const obj = visibleObjects.find(o => o.id === sched.objectId);
+                    if (obj) {
+                      const name = obj.commonName ? `${obj.name} ${obj.commonName}` : obj.name;
+                      list += `${idx + 1}. ${formatTime(sched.startTime)} - ${formatTime(sched.endTime)}: ${name} (${Math.round(sched.imagingTime)}m)\n`;
+                    }
+                  });
+                  
+                  navigator.clipboard.writeText(list);
+                  setCopiedButton('list');
+                  setTimeout(() => {
+                    setCopiedButton(null);
+                  }, 1500);
+                }}
+                className={`mt-2 px-3 py-1 text-sm rounded transition-all ${
+                  copiedButton === 'list' 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {copiedButton === 'list' ? 'Copied ✓' : 'Copy Observation List'}
               </button>
             </div>
             
