@@ -356,7 +356,7 @@ Score: ${block.observationScore?.toFixed(1)}`}
                         >
                           <div className="px-2 py-1 h-full flex flex-col justify-center overflow-visible">
                             <div className="text-xs font-bold text-white whitespace-nowrap">
-                              {block.commonName || block.name}
+                              {block.commonName ? `${block.name} ${block.commonName}` : block.name}
                             </div>
                             <div className="text-xs text-gray-200 opacity-90 whitespace-nowrap">
                               {Math.round(block.totalObservationTime)}m • Score: {block.observationScore?.toFixed(0)}

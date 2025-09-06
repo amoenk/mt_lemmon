@@ -348,7 +348,7 @@ export const deepSkyObjects: DeepSkyObject[] = [
   {
     id: 'm35',
     name: 'M35',
-    commonName: '',
+    commonName: 'Shoe Buckle Cluster',
     type: 'open_cluster',
     constellation: 'Gemini',
     ra: { hours: 6, minutes: 9, seconds: 0 },
