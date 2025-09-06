@@ -8,14 +8,67 @@
     font-family: system-ui, -apple-system, sans-serif;
   }
   
+  * {
+    box-sizing: border-box;
+  }
+  
   body {
     background-color: rgb(3 7 18);
     color: rgb(243 244 246);
     min-height: 100vh;
+    margin: 0;
+    padding: 0;
   }
   
   /* Night mode - red theme for preserving night vision */
   body.night-mode {
     filter: sepia(100%) saturate(200%) hue-rotate(320deg) brightness(0.4) contrast(2);
+  }
+}
+
+/* Simple layout classes */
+.container-content {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+@media (min-width: 640px) {
+  .container-content {
+    padding: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container-content {
+    padding: 2rem;
+  }
+}
+
+.main-content {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+.main-content > * {
+  margin-bottom: 2rem;
+}
+
+/* Gantt chart section - full width on mobile */
+.gantt-section {
+  padding: 0;
+}
+
+@media (min-width: 640px) {
+  .gantt-section {
+    padding: 0 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .gantt-section {
+    padding: 0 2rem;
   }
 }

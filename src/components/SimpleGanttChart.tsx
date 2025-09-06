@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface SimpleGanttChartProps {
   observations: any[];
@@ -20,9 +20,24 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   endTime,
   scheduledObservations = []
 }) => {
-  // Extend the view 3 hours before and after
-  const extendedStartTime = new Date(startTime.getTime() - 3 * 60 * 60 * 1000);
-  const extendedEndTime = new Date(endTime.getTime() + 3 * 60 * 60 * 1000);
+  // Responsive hook to detect mobile
+  const [isMobile, setIsMobile] = useState(false);
+  
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+  
+  // Extend the view - much less on mobile for better visibility
+  const extensionHours = isMobile ? 0.25 : 1.5; // 15 minutes on mobile, 1.5 hours on desktop
+  
+  const extendedStartTime = new Date(startTime.getTime() - extensionHours * 60 * 60 * 1000);
+  const extendedEndTime = new Date(endTime.getTime() + extensionHours * 60 * 60 * 1000);
   
   // Calculate total duration in minutes (for extended view)
   const totalMinutes = (extendedEndTime.getTime() - extendedStartTime.getTime()) / 60000;
@@ -160,11 +175,11 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   });
   
   return (
-    <div className="bg-gray-900 p-6 rounded-lg">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-bold">Observation Timeline (MST)</h3>
-        <div className="text-sm text-gray-400">
-          {formatTime(startTime)} - {formatTime(endTime)}
+    <div className="bg-gray-900 p-0 sm:p-6 rounded-lg">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-2 sm:mb-4 gap-1 sm:gap-0 px-3 sm:px-0 pt-3 sm:pt-0">
+        <h3 className="text-lg sm:text-xl font-bold">Observation Timeline</h3>
+        <div className="text-xs sm:text-sm text-gray-400">
+          {formatTime(startTime)} - {formatTime(endTime)} MST
         </div>
       </div>
       
@@ -187,9 +202,20 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
         </div>
       ) : (
         <>
-          <div className="bg-gray-800 rounded-lg p-4 overflow-hidden">
+          <div className="bg-gray-800 rounded-none sm:rounded-lg p-0 sm:p-4 overflow-hidden">
             {/* Timeline header with hour markers */}
-            <div className="relative h-8 border-b border-gray-700 mb-4 -mx-4 px-4">
+            <div className="relative h-6 sm:h-8 border-b border-gray-700 mb-2 sm:mb-4 px-2 sm:px-4 pt-2 sm:pt-0">
+              {/* Mobile: Show only start and end times */}
+              <div className="sm:hidden">
+                <div className="absolute text-xs text-gray-400 left-0">
+                  {formatTime(extendedStartTime)}
+                </div>
+                <div className="absolute text-xs text-gray-400 right-0">
+                  {formatTime(extendedEndTime)}
+                </div>
+              </div>
+              
+              {/* Desktop: Show all hour markers */}
               {hours.map((hour, i) => {
                 const position = getPosition(hour);
                 if (position < 0 || position > 100) return null;
@@ -197,7 +223,7 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
                 return (
                   <div
                     key={i}
-                    className="absolute text-xs text-gray-400"
+                    className="absolute text-xs text-gray-400 hidden sm:block"
                     style={{ 
                       left: `${position}%`,
                       transform: 'translateX(-50%)'
@@ -210,7 +236,7 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
             </div>
             
             {/* Timeline rows */}
-            <div className="relative -mx-4 px-4" style={{ minHeight: `${rows.length * 50 + 20}px` }}>
+            <div className="relative sm:-mx-4 sm:px-4 pb-2 sm:pb-0" style={{ minHeight: `${rows.length * 50 + 20}px` }}>
               {/* Dimmed regions outside observation window */}
               <div
                 className="absolute top-0 bottom-0 bg-gray-900/50 pointer-events-none z-20"
@@ -376,29 +402,33 @@ Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
           </div>
           
           {/* Legend */}
-          <div className="mt-4 flex flex-wrap gap-4 text-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-red-600 rounded"></div>
-              <span>High Priority (9-10)</span>
+          <div className="mt-3 sm:mt-4 px-3 sm:px-0 pb-3 sm:pb-0 flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm">
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 bg-red-600 rounded"></div>
+              <span className="hidden sm:inline">High Priority (9-10)</span>
+              <span className="sm:hidden">High</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-orange-600 rounded"></div>
-              <span>Medium-High (7-8)</span>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 bg-orange-600 rounded"></div>
+              <span className="hidden sm:inline">Medium-High (7-8)</span>
+              <span className="sm:hidden">Med-High</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-yellow-600 rounded"></div>
-              <span>Medium (5-6)</span>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 bg-yellow-600 rounded"></div>
+              <span className="hidden sm:inline">Medium (5-6)</span>
+              <span className="sm:hidden">Medium</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-green-600 rounded"></div>
-              <span>Low (&lt; 5)</span>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 bg-green-600 rounded"></div>
+              <span className="hidden sm:inline">Low (&lt; 5)</span>
+              <span className="sm:hidden">Low</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-0.5 h-4 bg-white opacity-50"></div>
-              <span>Transit Time</span>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-0.5 h-3 sm:h-4 bg-white opacity-50"></div>
+              <span>Transit</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-1 rounded-sm" style={{ backgroundColor: '#6495ED' }}></div>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-3 sm:w-4 h-1 rounded-sm" style={{ backgroundColor: '#6495ED' }}></div>
               <span>Scheduled</span>
             </div>
           </div>

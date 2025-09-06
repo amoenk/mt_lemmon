@@ -5,16 +5,12 @@ interface FilterControlsProps {
   startTime: string;
   endTime: string;
   minAltitude: number;
-  showDeepSky: boolean;
-  showSolarSystem: boolean;
-  nightMode: boolean;
+  setupTime: number;
   onDateChange: (date: string) => void;
   onStartTimeChange: (time: string) => void;
   onEndTimeChange: (time: string) => void;
   onMinAltitudeChange: (altitude: number) => void;
-  onShowDeepSkyChange: (show: boolean) => void;
-  onShowSolarSystemChange: (show: boolean) => void;
-  onNightModeChange: (mode: boolean) => void;
+  onSetupTimeChange: (time: number) => void;
 }
 
 export const FilterControls: React.FC<FilterControlsProps> = ({
@@ -22,20 +18,16 @@ export const FilterControls: React.FC<FilterControlsProps> = ({
   startTime,
   endTime,
   minAltitude,
-  showDeepSky,
-  showSolarSystem,
-  nightMode,
+  setupTime,
   onDateChange,
   onStartTimeChange,
   onEndTimeChange,
   onMinAltitudeChange,
-  onShowDeepSkyChange,
-  onShowSolarSystemChange,
-  onNightModeChange
+  onSetupTimeChange
 }) => {
   return (
-    <div className="bg-gray-900 p-6 rounded-lg">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="bg-gray-900 p-4 sm:p-6 rounded-lg">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Observation Date
@@ -95,38 +87,22 @@ export const FilterControls: React.FC<FilterControlsProps> = ({
           />
         </div>
         
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={showDeepSky}
-              onChange={(e) => onShowDeepSkyChange(e.target.checked)}
-              className="w-4 h-4 text-blue-600 bg-gray-800 border-gray-600 rounded focus:ring-blue-500"
-            />
-            <span className="text-sm text-gray-300">Deep Sky</span>
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Setup Time: {setupTime} min
           </label>
-          
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={showSolarSystem}
-              onChange={(e) => onShowSolarSystemChange(e.target.checked)}
-              className="w-4 h-4 text-blue-600 bg-gray-800 border-gray-600 rounded focus:ring-blue-500"
-            />
-            <span className="text-sm text-gray-300">Solar System</span>
-          </label>
-        </div>
-        
-        <div className="flex items-center">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={nightMode}
-              onChange={(e) => onNightModeChange(e.target.checked)}
-              className="w-4 h-4 text-red-600 bg-gray-800 border-gray-600 rounded focus:ring-red-500"
-            />
-            <span className="text-sm text-gray-300">Night Vision Mode</span>
-          </label>
+          <input
+            type="range"
+            min="5"
+            max="30"
+            step="5"
+            value={setupTime}
+            onChange={(e) => onSetupTimeChange(Number(e.target.value))}
+            className="w-full"
+          />
+          <div className="text-xs text-gray-500 mt-1">
+            Time for slewing, focusing, and alignment between targets
+          </div>
         </div>
       </div>
     </div>

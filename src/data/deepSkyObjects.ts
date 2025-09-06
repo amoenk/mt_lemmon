@@ -344,5 +344,50 @@ export const deepSkyObjects: DeepSkyObject[] = [
     filters: ['L', 'RGB', 'Ha'],
     priority: 'medium',
     notes: 'Bright spiral galaxy with active star formation.'
+  },
+  {
+    id: 'm35',
+    name: 'M35',
+    commonName: '',
+    type: 'open_cluster',
+    constellation: 'Gemini',
+    ra: { hours: 6, minutes: 9, seconds: 0 },
+    dec: { degrees: 24, minutes: 21, seconds: 0 },
+    magnitude: 5.1,
+    size: { width: 28, height: 28 },
+    bestMonths: [12, 1, 2, 3],
+    filters: ['L', 'RGB'],
+    priority: 'medium',
+    notes: 'Beautiful open cluster with NGC 2158 nearby. Great winter target.'
+  },
+  {
+    id: 'm3',
+    name: 'M3',
+    commonName: '',
+    type: 'globular_cluster',
+    constellation: 'Canes Venatici',
+    ra: { hours: 13, minutes: 42, seconds: 11 },
+    dec: { degrees: 28, minutes: 22, seconds: 38 },
+    magnitude: 6.2,
+    size: { width: 18, height: 18 },
+    bestMonths: [3, 4, 5, 6, 7],
+    filters: ['L', 'RGB'],
+    priority: 'medium',
+    notes: 'One of the brightest and largest globular clusters. Contains ~500,000 stars.'
+  },
+  {
+    id: 'm65',
+    name: 'M65',
+    commonName: 'Leo Triplet (with M66, NGC3628)',
+    type: 'galaxy',
+    constellation: 'Leo',
+    ra: { hours: 11, minutes: 18, seconds: 56 },
+    dec: { degrees: 13, minutes: 5, seconds: 32 },
+    magnitude: 9.3,
+    size: { width: 10, height: 3 },
+    bestMonths: [2, 3, 4, 5],
+    filters: ['L', 'RGB'],
+    priority: 'high',
+    notes: 'Part of the famous Leo Triplet. Image all three galaxies together in wide field.'
   }
 ];

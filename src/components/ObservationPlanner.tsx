@@ -61,6 +61,7 @@ export const ObservationPlanner: React.FC = () => {
             startTime: parsed.st || '22:00',
             endTime: parsed.et || '06:00',
             minAltitude: parsed.ma || 15,
+            setupTime: parsed.setup || 10,
             hiddenObjects: new Set<string>(parsed.h || []),
             customSettings: parsed.cs || {}
           };
@@ -86,9 +87,10 @@ export const ObservationPlanner: React.FC = () => {
   const [minAltitude, setMinAltitude] = useState<number>(() =>
     urlSettings?.minAltitude || loadSettingWithUrlParam('minAltitude', 'alt', 15)
   );
+  const [setupTime, setSetupTime] = useState<number>(() =>
+    urlSettings?.setupTime || loadSettingWithUrlParam('setupTime', 'setup', 10)
+  );
   const [isNightMode, setIsNightMode] = useState<boolean>(false);
-  const [showDeepSky, setShowDeepSky] = useState<boolean>(true);
-  const [showSolarSystem, setShowSolarSystem] = useState<boolean>(true);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [disabledObjects, setDisabledObjects] = useState<Set<string>>(() => {
     if (urlSettings?.hiddenObjects) {
@@ -144,6 +146,10 @@ export const ObservationPlanner: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('minAltitude', JSON.stringify(minAltitude));
   }, [minAltitude]);
+
+  useEffect(() => {
+    localStorage.setItem('setupTime', JSON.stringify(setupTime));
+  }, [setupTime]);
 
   useEffect(() => {
     localStorage.setItem('disabledObjects', JSON.stringify(Array.from(disabledObjects)));
@@ -218,11 +224,25 @@ export const ObservationPlanner: React.FC = () => {
   const moonInfo = useMemo(() => getMoonPhase(observationDate), [observationDate]);
   
   const allObjects = useMemo(() => {
-    const deepSky = showDeepSky ? deepSkyObjects.map(obj => {
+    const deepSky = deepSkyObjects.map(obj => {
       const ra = raToDecimal(obj.ra);
       const dec = decToDecimal(obj.dec);
       const currentAlt = calculateAltitude(ra, dec, observationDate, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
       const timings = calculateObjectTimings(ra, dec, observationDate, minAltitude);
+      
+      // Calculate max altitude during observation window
+      let maxAltitudeDuringWindow = 0;
+      const checkInterval = 15; // Check every 15 minutes
+      const totalMinutes = (observationEndDate.getTime() - observationDate.getTime()) / 60000;
+      const steps = Math.ceil(totalMinutes / checkInterval);
+      
+      for (let i = 0; i <= steps; i++) {
+        const checkTime = new Date(observationDate.getTime() + (i * checkInterval * 60000));
+        const alt = calculateAltitude(ra, dec, checkTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
+        if (alt > maxAltitudeDuringWindow) {
+          maxAltitudeDuringWindow = alt;
+        }
+      }
       
       const exposure = getExposureRecommendations(obj.type, obj.magnitude);
       
@@ -295,6 +315,7 @@ export const ObservationPlanner: React.FC = () => {
         size: obj.size,
         currentAltitude: currentAlt,
         timings,
+        maxAltitudeDuringWindow,
         exposure,
         activeFilters,
         customImagingTime,
@@ -303,13 +324,30 @@ export const ObservationPlanner: React.FC = () => {
         observationScore,
         observableDuration
       };
-    }) : [];
+    });
 
-    const planets = showSolarSystem ? solarSystemObjects.filter(obj => obj.type === 'planet').map(planet => {
+    const planets = solarSystemObjects.filter(obj => obj.type === 'planet').map(planet => {
       const position = getPlanetPosition(planet.name, observationDate);
       
       if (position) {
         const timings = calculateObjectTimings(position.ra, position.dec, observationDate, minAltitude);
+        
+        // Calculate max altitude during observation window for planets
+        let maxAltitudeDuringWindow = 0;
+        const checkInterval = 15; // Check every 15 minutes
+        const totalMinutes = (observationEndDate.getTime() - observationDate.getTime()) / 60000;
+        const steps = Math.ceil(totalMinutes / checkInterval);
+        
+        for (let i = 0; i <= steps; i++) {
+          const checkTime = new Date(observationDate.getTime() + (i * checkInterval * 60000));
+          const planetPosAtTime = getPlanetPosition(planet.name, checkTime);
+          if (planetPosAtTime) {
+            const alt = calculateAltitude(planetPosAtTime.ra, planetPosAtTime.dec, checkTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
+            if (alt > maxAltitudeDuringWindow) {
+              maxAltitudeDuringWindow = alt;
+            }
+          }
+        }
         const exposure = getExposureRecommendations('planet');
         
         // Use custom settings if available
@@ -358,6 +396,7 @@ export const ObservationPlanner: React.FC = () => {
           size: undefined,
           currentAltitude: position.altitude,
           timings,
+          maxAltitudeDuringWindow,
           exposure,
           activeFilters,
           customImagingTime,
@@ -368,7 +407,7 @@ export const ObservationPlanner: React.FC = () => {
         };
       }
       return null;
-    }).filter((item): item is NonNullable<typeof item> => item !== null) : [];
+    }).filter((item): item is NonNullable<typeof item> => item !== null);
 
     const combined = [...deepSky, ...planets];
     
@@ -384,7 +423,7 @@ export const ObservationPlanner: React.FC = () => {
       
       return aTransitTime - bTransitTime;
     });
-  }, [observationDate, minAltitude, showDeepSky, showSolarSystem, customSettings]);
+  }, [observationDate, observationEndDate, minAltitude, customSettings]);
 
   const visibleObjects = allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id));
 
@@ -406,9 +445,9 @@ export const ObservationPlanner: React.FC = () => {
     for (const obj of visibleObjects) {
       if (currentTime >= windowEnd) break;
       
-      // Add 5 minute setup between objects (but not before the first one)
+      // Add setup time between objects (but not before the first one)
       if (!isFirstObject) {
-        currentTime = new Date(currentTime.getTime() + 5 * 60 * 1000); // Add 5 minutes between objects
+        currentTime = new Date(currentTime.getTime() + setupTime * 60 * 1000); // Add setup time between objects
         if (currentTime >= windowEnd) break;
       }
       
@@ -429,7 +468,7 @@ export const ObservationPlanner: React.FC = () => {
       
       // Calculate observation duration
       // For first object, include setup. For subsequent objects, setup was already added above
-      const setupTime = 5; // 5 minutes setup/slew/focus
+      const setupTimeForCalculation = setupTime; // Use the configurable setup time
       const imagingTimeOnly = Math.round((obj.totalObservationTime || 70) - 10); // Still subtract 10 from total since that's built into the object's time
       const totalTime = imagingTimeOnly; // Just the imaging time, setup already accounted for
       
@@ -453,7 +492,7 @@ export const ObservationPlanner: React.FC = () => {
         objectId: obj.id,
         startTime: new Date(currentTime),
         endTime: proposedEndTime,
-        setupTime: isFirstObject ? 0 : setupTime, // No setup for first object, it's at start of session
+        setupTime: isFirstObject ? 0 : setupTimeForCalculation, // No setup for first object, it's at start of session
         imagingTime: imagingTimeOnly
       });
       
@@ -463,7 +502,7 @@ export const ObservationPlanner: React.FC = () => {
     }
     
     return scheduled;
-  }, [visibleObjects, observationDate, observationEndDate, minAltitude]);
+  }, [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime]);
 
   // Automatically enable objects that get scheduled
   useEffect(() => {
@@ -520,6 +559,7 @@ export const ObservationPlanner: React.FC = () => {
       st: startTime,
       et: endTime,
       ma: minAltitude,
+      setup: setupTime,
       h: Array.from(disabledObjects),
       cs: customSettings
     };
@@ -571,6 +611,7 @@ export const ObservationPlanner: React.FC = () => {
       setStartTime(settings.st || '22:00');
       setEndTime(settings.et || '06:00');
       setMinAltitude(settings.ma || 15);
+      setSetupTime(settings.setup || 10); // Default to 10 if not present (backwards compatibility)
       setDisabledObjects(new Set(settings.h || []));
       setCustomSettings(settings.cs || {});
       
@@ -593,6 +634,7 @@ export const ObservationPlanner: React.FC = () => {
     localStorage.removeItem('startTime');
     localStorage.removeItem('endTime');
     localStorage.removeItem('minAltitude');
+    localStorage.removeItem('setupTime');
     localStorage.removeItem('disabledObjects');
     localStorage.removeItem('customObjectSettings');
     
@@ -601,58 +643,61 @@ export const ObservationPlanner: React.FC = () => {
     setStartTime('22:00');
     setEndTime('06:00');
     setMinAltitude(15);
+    setSetupTime(10);
     setDisabledObjects(new Set());
     setCustomSettings({});
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950">
+    <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 overflow-x-hidden">
       <header className="bg-black/50 backdrop-blur-sm border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="text-2xl">🔭</div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                Mt. Lemmon Sky Center - 32" Telescope
+        <div className="container-content">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="text-xl sm:text-2xl">🔭</div>
+              <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                <span className="sm:hidden">Mt. Lemmon 32"</span>
+                <span className="hidden sm:inline">Mt. Lemmon Sky Center - 32" Telescope</span>
               </h1>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
               <button
                 onClick={handleExport}
-                className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
                 title="Export settings to shareable code"
               >
-                <span>📤</span>
-                <span className="text-sm font-medium">Export</span>
+                <span className="text-sm sm:text-base">📤</span>
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Export</span>
               </button>
               <button
                 onClick={() => setShowImportModal(true)}
-                className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
                 title="Import settings from code"
               >
-                <span>📥</span>
-                <span className="text-sm font-medium">Import</span>
+                <span className="text-sm sm:text-base">📥</span>
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Import</span>
               </button>
               <button
                 onClick={resetSettings}
-                className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
                 title="Reset all settings to defaults"
               >
-                <span>↺</span>
-                <span className="text-sm font-medium">Reset</span>
+                <span className="text-sm sm:text-base">↺</span>
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Reset</span>
               </button>
               <button
                 onClick={() => setIsNightMode(!isNightMode)}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                className={`flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all ${
                   isNightMode 
                     ? 'bg-red-900/30 text-red-400 border border-red-800 hover:bg-red-900/50' 
                     : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
                 }`}
               >
-                <span>{isNightMode ? '🔴' : '🌙'}</span>
-                <span className="text-sm font-medium">
-                  {isNightMode ? 'Night Vision' : 'Normal Mode'}
+                <span className="text-sm sm:text-base">{isNightMode ? '🔴' : '🌙'}</span>
+                <span className="text-xs sm:text-sm font-medium">
+                  <span className="hidden sm:inline">{isNightMode ? 'Night Vision' : 'Normal Mode'}</span>
+                  <span className="sm:hidden">{isNightMode ? 'Night' : 'Normal'}</span>
                 </span>
               </button>
             </div>
@@ -660,38 +705,39 @@ export const ObservationPlanner: React.FC = () => {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Gantt Chart - Now at the top */}
+      <div className="main-content">
+        {/* Gantt Chart - Full width on mobile */}
         {visibleObjects.length > 0 && (
-          <SimpleGanttChart
-            observations={visibleObjects}
-            startTime={observationDate}
-            endTime={observationEndDate}
-            expandedRows={expandedRows}
-            scheduledObservations={scheduledObservations}
-          />
+          <div className="gantt-section">
+            <SimpleGanttChart
+              observations={visibleObjects}
+              startTime={observationDate}
+              endTime={observationEndDate}
+              expandedRows={expandedRows}
+              scheduledObservations={scheduledObservations}
+            />
+          </div>
         )}
 
         {/* Filter Controls */}
-        <FilterControls
+        <div className="container-content">
+          <FilterControls
           observationDate={selectedDate}
           startTime={startTime}
           endTime={endTime}
           minAltitude={minAltitude}
-          showDeepSky={showDeepSky}
-          showSolarSystem={showSolarSystem}
-          nightMode={isNightMode}
+          setupTime={setupTime}
           onDateChange={setSelectedDate}
           onStartTimeChange={setStartTime}
           onEndTimeChange={setEndTime}
           onMinAltitudeChange={setMinAltitude}
-          onShowDeepSkyChange={setShowDeepSky}
-          onShowSolarSystemChange={setShowSolarSystem}
-          onNightModeChange={setIsNightMode}
-        />
+          onSetupTimeChange={setSetupTime}
+          />
+        </div>
 
         {/* Conditions Info */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="container-content">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           <div className="bg-gray-900 p-4 rounded-lg">
             <div className="flex items-center space-x-2 mb-2">
               <span className="text-2xl">📍</span>
@@ -721,10 +767,12 @@ export const ObservationPlanner: React.FC = () => {
               of {allObjects.length} objects visible
             </p>
           </div>
+          </div>
         </div>
 
         {/* Observation Table */}
-        <ObservationTable
+        <div className="container-content">
+          <ObservationTable
           observations={allObjects}
           expandedRows={expandedRows}
           scheduledObservations={scheduledObservations}
@@ -734,6 +782,7 @@ export const ObservationPlanner: React.FC = () => {
           onToggleEnabled={toggleObjectEnabled}
           onUpdateSettings={updateObjectSettings}
         />
+        </div>
       </div>
 
       {/* Export Modal */}
