@@ -5,7 +5,7 @@ A web-based observation planning tool for the Mt. Lemmon Sky Center 32" telescop
 ## Features
 
 - **Real-time altitude calculations** - See which objects are visible during your observation window
-- **Smart scheduling** - Automatically schedules objects based on transit times and priorities  
+- **Smart scheduling** - Automatically schedules objects based on transit times and priorities
 - **Gantt chart visualization** - Visual timeline showing when each object is observable
 - **Mobile-friendly** - Fully responsive design for planning in the field
 - **Imaging recommendations** - Exposure times, filter sequences, and settings for a 32" f/5 telescope
@@ -22,7 +22,7 @@ Open [http://localhost:5173](http://localhost:5173) to start planning.
 
 ## Production
 
-Deployed at [mtlemmon.vercel.app](https://mtlemmon.vercel.app)
+Deployed at [mtlemmon-eight.vercel.app](https://mtlemmon-eight.vercel.app)
 
 ## Tech Stack
 
