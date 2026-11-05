@@ -322,7 +322,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                           </label>
                           <div className="flex flex-wrap gap-2">
                             {(() => {
-                              let allFilters: string[] = [];
+                              let allFilters: string[];
                               if (obj.type === 'planet') {
                                 allFilters = ['Luminance', 'IR850', 'Red', 'Green', 'Blue', 'CH4'];
                               } else if (obj.type === 'nebula' || obj.type === 'planetary_nebula' || obj.type === 'supernova_remnant') {
@@ -666,7 +666,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                               <div className="flex flex-wrap gap-2">
                                 {(() => {
                                   // Define all available filters based on object type
-                                  let allFilters: string[] = [];
+                                  let allFilters: string[];
                                   if (obj.type === 'planet') {
                                     allFilters = ['Luminance', 'IR850', 'Red', 'Green', 'Blue', 'CH4'];
                                   } else if (obj.type === 'nebula' || obj.type === 'planetary_nebula' || obj.type === 'supernova_remnant') {

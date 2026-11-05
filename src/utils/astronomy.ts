@@ -452,7 +452,7 @@ export function getMoonPhase(date: Date): { phase: string; illumination: number 
   const illumination = Astronomy.Illumination(Astronomy.Body.Moon, time);
   const moonPhase = Astronomy.MoonPhase(time);
   
-  let phaseStr = '';
+  let phaseStr: string;
   if (moonPhase < 7) phaseStr = 'New Moon';
   else if (moonPhase < 14) phaseStr = 'First Quarter';
   else if (moonPhase < 21) phaseStr = 'Full Moon';
