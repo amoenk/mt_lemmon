@@ -9,7 +9,8 @@ import {
   MT_LEMMON_LOCATION,
   getPlanetPosition,
   calculateObjectTimings,
-  getExposureRecommendations
+  getExposureRecommendations,
+  type PlannedObject
 } from '../utils/astronomy';
 import { SimpleGanttChart } from './SimpleGanttChart';
 import { FilterControls } from './FilterControls';
@@ -128,6 +129,7 @@ export const ObservationPlanner: React.FC = () => {
       url.searchParams.delete('s');
       window.history.replaceState({}, '', url.toString());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array ensures this runs only once on mount
 
   // Save settings to localStorage when they change
@@ -182,7 +184,7 @@ export const ObservationPlanner: React.FC = () => {
       }
       
       return date;
-    } catch (error) {
+    } catch {
       const fallback = new Date();
       fallback.setHours(22, 0, 0, 0);
       return fallback;
@@ -197,7 +199,7 @@ export const ObservationPlanner: React.FC = () => {
         ? `${selectedDate}T${endTime}:00-07:00` // Next day (after midnight)
         : `${selectedDate}T${endTime}:00-07:00`; // Same day
       
-      let date = new Date(endDateString);
+      const date = new Date(endDateString);
       
       // Check if date is valid
       if (isNaN(date.getTime())) {
@@ -213,7 +215,7 @@ export const ObservationPlanner: React.FC = () => {
       }
       
       return date;
-    } catch (error) {
+    } catch {
       const fallback = new Date(observationDate);
       fallback.setDate(fallback.getDate() + 1);
       fallback.setHours(6, 0, 0, 0);
@@ -223,7 +225,7 @@ export const ObservationPlanner: React.FC = () => {
   
   const moonInfo = useMemo(() => getMoonPhase(observationDate), [observationDate]);
   
-  const allObjects = useMemo(() => {
+  const allObjects = useMemo((): PlannedObject[] => {
     const deepSky = deepSkyObjects.map(obj => {
       const ra = raToDecimal(obj.ra);
       const dec = decToDecimal(obj.dec);
@@ -244,7 +246,7 @@ export const ObservationPlanner: React.FC = () => {
         }
       }
       
-      const exposure = getExposureRecommendations(obj.type, obj.magnitude);
+      const exposure = getExposureRecommendations(obj.type);
       
       // Use custom settings if available
       const objectCustomSettings = customSettings[obj.name];
