@@ -16,6 +16,8 @@ import { SimpleGanttChart } from './SimpleGanttChart';
 import { FilterControls } from './FilterControls';
 import { ObservationTable } from './ObservationTable';
 
+const DEFAULT_OBSERVATION_DATE = '2026-12-29';
+
 export const ObservationPlanner: React.FC = () => {
   // Check URL params first, then localStorage, then defaults
   const loadSettingWithUrlParam = <T,>(key: string, urlParam: string, defaultValue: T): T => {
@@ -58,7 +60,7 @@ export const ObservationPlanner: React.FC = () => {
         // Validate version
         if (parsed.v === 1) {
           return {
-            selectedDate: parsed.d || '2026-03-20',
+            selectedDate: parsed.d || DEFAULT_OBSERVATION_DATE,
             startTime: parsed.st || '22:00',
             endTime: parsed.et || '06:00',
             minAltitude: parsed.ma || 15,
@@ -77,7 +79,7 @@ export const ObservationPlanner: React.FC = () => {
   const urlSettings = loadSettingsFromUrl();
 
   const [selectedDate, setSelectedDate] = useState<string>(() => 
-    urlSettings?.selectedDate || loadSettingWithUrlParam('observationDate', 'date', '2026-03-20')
+    urlSettings?.selectedDate || loadSettingWithUrlParam('observationDate', 'date', DEFAULT_OBSERVATION_DATE)
   );
   const [startTime, setStartTime] = useState<string>(() => 
     urlSettings?.startTime || loadSettingWithUrlParam('startTime', 'start', '22:00')
@@ -588,7 +590,7 @@ export const ObservationPlanner: React.FC = () => {
       }
       
       // Apply settings
-      setSelectedDate(settings.d || '2026-03-20');
+      setSelectedDate(settings.d || DEFAULT_OBSERVATION_DATE);
       setStartTime(settings.st || '22:00');
       setEndTime(settings.et || '06:00');
       setMinAltitude(settings.ma || 15);
@@ -620,7 +622,7 @@ export const ObservationPlanner: React.FC = () => {
     localStorage.removeItem('customObjectSettings');
     
     // Reset to defaults
-    setSelectedDate('2026-03-20');
+    setSelectedDate(DEFAULT_OBSERVATION_DATE);
     setStartTime('22:00');
     setEndTime('06:00');
     setMinAltitude(15);
