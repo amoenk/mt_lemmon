@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import type { PlannedObject } from '../utils/astronomy';
+import { getMoonUpPeriods, type MoonPhaseInfo, type PlannedObject } from '../utils/astronomy';
 
 interface SimpleGanttChartProps {
   observations: PlannedObject[];
+  moonPhase: MoonPhaseInfo;
   startTime: Date;
   endTime: Date;
   expandedRows: Set<string>;
@@ -17,6 +18,7 @@ interface SimpleGanttChartProps {
 
 export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   observations,
+  moonPhase,
   startTime,
   endTime,
   scheduledObservations = []
@@ -72,6 +74,15 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
       timeZone: 'America/Phoenix'
     });
   };
+  
+  // Moon rows: always shown in the top row, brighter the fuller it is
+  const moonPeriods = getMoonUpPeriods(extendedStartTime, extendedEndTime);
+  const moonUpDuringWindow = moonPeriods.some(p => p.riseTime < endTime && p.setTime > startTime);
+  const moonLabel = `${moonPhase.emoji} ${moonPhase.phase} · ${moonPhase.illumination.toFixed(0)}%`;
+  const moonOpacity = 0.15 + 0.85 * (moonPhase.illumination / 100);
+  const moonLabelClass = moonPhase.illumination > 70
+    ? 'text-slate-900'
+    : 'text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]';
   
   // Get priority color
   const getPriorityColor = (priority: number): string => {
@@ -197,12 +208,7 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
         </defs>
       </svg>
       
-      {observations.length === 0 ? (
-        <div className="text-center py-8 text-gray-500">
-          No observations scheduled in this time window
-        </div>
-      ) : (
-        <>
+      <>
           <div className="bg-gray-800 rounded-none sm:rounded-lg p-0 sm:p-4 overflow-hidden">
             {/* Timeline header with hour markers */}
             <div className="relative h-6 sm:h-8 border-b border-gray-700 mb-2 sm:mb-4 px-2 sm:px-4 pt-2 sm:pt-0">
@@ -237,7 +243,7 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
             </div>
             
             {/* Timeline rows */}
-            <div className="relative sm:-mx-4 sm:px-4 pb-2 sm:pb-0" style={{ minHeight: `${rows.length * 50 + 20}px` }}>
+            <div className="relative sm:-mx-4 sm:px-4 pb-2 sm:pb-0" style={{ minHeight: `${(Math.max(rows.length, 1) + 1) * 50 + 20}px` }}>
               {/* Dimmed regions outside observation window */}
               <div
                 className="absolute top-0 bottom-0 bg-gray-900/50 pointer-events-none z-20"
@@ -278,6 +284,61 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
                 );
               })}
               
+              {/* Moon row */}
+              {moonPeriods.map(period => {
+                const startPercent = getPosition(period.riseTime);
+                const endPercent = getPosition(period.setTime);
+                
+                return (
+                  <div
+                    key={period.riseTime.getTime()}
+                    className="absolute"
+                    style={{
+                      left: `${startPercent}%`,
+                      width: `${endPercent - startPercent}%`,
+                      top: '0',
+                      height: '40px'
+                    }}
+                    title={`Moon
+Rise: ${formatTime(period.riseTime)}
+Set: ${formatTime(period.setTime)}
+${moonPhase.phase}, ${moonPhase.illumination.toFixed(0)}% illuminated`}
+                  >
+                    <div
+                      className="absolute inset-0 rounded-md bg-slate-200 border border-slate-300"
+                      style={{ opacity: moonOpacity }}
+                    />
+                  </div>
+                );
+              })}
+              {moonPeriods.map(period => (
+                <div
+                  key={`label-${period.riseTime.getTime()}`}
+                  className={`absolute px-2 h-10 flex items-center text-xs font-bold whitespace-nowrap pointer-events-none z-30 ${moonLabelClass}`}
+                  style={{
+                    // Keep the label inside the observation window when the Moon is up during it
+                    left: `${Math.max(getPosition(period.riseTime), period.setTime > startTime ? observationStartPercent : 0)}%`,
+                    top: '0'
+                  }}
+                >
+                  {moonLabel}
+                </div>
+              ))}
+              {!moonUpDuringWindow && (
+                <div
+                  className="absolute px-2 h-10 flex items-center text-xs text-gray-400 whitespace-nowrap"
+                  style={{ left: `${observationStartPercent}%`, top: '0' }}
+                >
+                  {moonLabel} • Below horizon all night
+                </div>
+              )}
+              
+              {observations.length === 0 && (
+                <div className="absolute left-0 right-0 text-center text-sm text-gray-500" style={{ top: '60px' }}>
+                  No observations scheduled in this time window
+                </div>
+              )}
+              
               {/* Observation blocks */}
               {rows.map((row, rowIndex) => (
                 <div key={rowIndex}>
@@ -291,7 +352,7 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
                         style={{
                           left: `${block.startPercent}%`,
                           width: `${block.widthPercent}%`,
-                          top: `${rowIndex * 50}px`,
+                          top: `${(rowIndex + 1) * 50}px`,
                           height: '40px'
                         }}
                       >
@@ -425,6 +486,11 @@ Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
               <span className="sm:hidden">Low</span>
             </div>
             <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 bg-slate-200 rounded"></div>
+              <span className="hidden sm:inline">Moon up (brighter = fuller)</span>
+              <span className="sm:hidden">Moon</span>
+            </div>
+            <div className="flex items-center gap-1 sm:gap-2">
               <div className="w-0.5 h-3 sm:h-4 bg-white opacity-50"></div>
               <span>Transit</span>
             </div>
@@ -433,8 +499,7 @@ Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
               <span>Scheduled</span>
             </div>
           </div>
-        </>
-      )}
+      </>
     </div>
   );
 };
