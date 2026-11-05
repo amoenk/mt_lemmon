@@ -506,27 +506,6 @@ export const ObservationPlanner: React.FC = () => {
     return scheduled;
   }, [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime]);
 
-  // Automatically enable objects that get scheduled
-  useEffect(() => {
-    const scheduledIds = new Set(scheduledObservations.map(s => s.objectId));
-    
-    setDisabledObjects(prevDisabled => {
-      const newDisabled = new Set(prevDisabled);
-      let hasChanges = false;
-      
-      // Check if any scheduled objects are disabled
-      for (const scheduledId of scheduledIds) {
-        if (newDisabled.has(scheduledId)) {
-          newDisabled.delete(scheduledId);
-          hasChanges = true;
-        }
-      }
-      
-      // Return new set if changes were made, otherwise return original
-      return hasChanges ? newDisabled : prevDisabled;
-    });
-  }, [scheduledObservations]);
-
   const toggleExpanded = (id: string) => {
     const newExpanded = new Set(expandedRows);
     if (newExpanded.has(id)) {
