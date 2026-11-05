@@ -109,7 +109,7 @@ export function calculateObjectTimings(
       
       if (crossesMeridian || (Math.abs(azimuth - 180) < 1 && Math.abs(lastAzimuth - 180) > Math.abs(azimuth - 180))) {
         // Find the exact transit by checking minute by minute around this time
-        let transitCheckDate = new Date(checkDate);
+        const transitCheckDate = new Date(checkDate);
         transitCheckDate.setMinutes(transitCheckDate.getMinutes() - 5);
         let bestTransit = { time: new Date(transitCheckDate), altitude, azimuth, diff: Math.abs(azimuth - 180) };
         
@@ -225,6 +225,27 @@ export interface ExposureSettings {
   notes: string;
 }
 
+export interface PlannedObject {
+  id: string;
+  name: string;
+  commonName?: string;
+  type: string;
+  priority: number;
+  defaultPriority: number;
+  magnitude?: number;
+  size?: { width: number; height: number };
+  currentAltitude: number;
+  timings: ObjectTimings;
+  maxAltitudeDuringWindow: number;
+  exposure: ExposureSettings;
+  activeFilters: string[];
+  customImagingTime?: number;
+  isVisible: boolean;
+  totalObservationTime: number;
+  observationScore: number;
+  observableDuration: number;
+}
+
 export function getMagnificationRecommendation(
   size: { width: number; height: number } | undefined,
   objectType: string
@@ -301,8 +322,7 @@ export function getMagnificationRecommendation(
 }
 
 export function getExposureRecommendations(
-  objectType: string,
-  _magnitude?: number
+  objectType: string
 ): ExposureSettings {
   // Recommendations for 32" f/5 reflector telescope
   // Assuming modern CMOS camera with cooling
@@ -453,7 +473,7 @@ export function getPlanetPosition(planet: string, date: Date): { ra: number; dec
   if (planet === 'Saturn') bodyName = 'Saturn';
   if (planet === 'Mars') bodyName = 'Mars';
   
-  const planetBody = (Astronomy.Body as any)[bodyName];
+  const planetBody = Astronomy.Body[bodyName as keyof typeof Astronomy.Body];
   if (planetBody === undefined) return null;
   
   const time = new Astronomy.AstroTime(date);

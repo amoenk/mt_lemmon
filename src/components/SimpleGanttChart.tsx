@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import type { PlannedObject } from '../utils/astronomy';
 
 interface SimpleGanttChartProps {
-  observations: any[];
+  observations: PlannedObject[];
   startTime: Date;
   endTime: Date;
   expandedRows: Set<string>;
@@ -44,7 +45,7 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   
   // Generate hour markers
   const hours: Date[] = [];
-  let currentHour = new Date(extendedStartTime);
+  const currentHour = new Date(extendedStartTime);
   currentHour.setMinutes(0, 0, 0);
   
   while (currentHour <= extendedEndTime) {

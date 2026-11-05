@@ -1,5 +1,5 @@
 import React from 'react';
-import { getExposureRecommendations, getMagnificationRecommendation } from '../utils/astronomy';
+import { getExposureRecommendations, getMagnificationRecommendation, type PlannedObject } from '../utils/astronomy';
 
 interface CustomObjectSettings {
   imagingTime?: number;
@@ -8,7 +8,7 @@ interface CustomObjectSettings {
 }
 
 interface ObservationTableProps {
-  observations: any[];
+  observations: PlannedObject[];
   expandedRows: Set<string>;
   scheduledObservations?: Array<{
     objectId: string;
@@ -66,7 +66,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
         {observations.map((obj) => {
           const isExpanded = expandedRows.has(obj.id);
           const isScheduled = scheduledObservations.some(s => s.objectId === obj.id);
-          const exposure = getExposureRecommendations(obj.type, obj.magnitude);
+          const exposure = getExposureRecommendations(obj.type);
           
           return (
             <div
@@ -405,7 +405,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
           {observations.map((obj) => {
             const isExpanded = expandedRows.has(obj.id);
             const isScheduled = scheduledObservations.some(s => s.objectId === obj.id);
-            const exposure = getExposureRecommendations(obj.type, obj.magnitude);
+            const exposure = getExposureRecommendations(obj.type);
             
             return (
               <React.Fragment key={obj.id}>
