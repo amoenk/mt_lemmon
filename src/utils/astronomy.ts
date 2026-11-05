@@ -447,21 +447,65 @@ export function isObjectVisible(
   });
 }
 
-export function getMoonPhase(date: Date): { phase: string; illumination: number } {
+export interface MoonPhaseInfo {
+  phase: string;
+  emoji: string;
+  illumination: number; // percent
+}
+
+const MOON_PHASES = [
+  { phase: 'New Moon', emoji: '🌑' },
+  { phase: 'Waxing Crescent', emoji: '🌒' },
+  { phase: 'First Quarter', emoji: '🌓' },
+  { phase: 'Waxing Gibbous', emoji: '🌔' },
+  { phase: 'Full Moon', emoji: '🌕' },
+  { phase: 'Waning Gibbous', emoji: '🌖' },
+  { phase: 'Last Quarter', emoji: '🌗' },
+  { phase: 'Waning Crescent', emoji: '🌘' }
+];
+
+export function getMoonPhase(date: Date): MoonPhaseInfo {
   const time = new Astronomy.AstroTime(date);
   const illumination = Astronomy.Illumination(Astronomy.Body.Moon, time);
+  // Ecliptic longitude difference from the Sun: 0° = new, 90° = first quarter, 180° = full, 270° = last quarter
   const moonPhase = Astronomy.MoonPhase(time);
-  
-  let phaseStr: string;
-  if (moonPhase < 7) phaseStr = 'New Moon';
-  else if (moonPhase < 14) phaseStr = 'First Quarter';
-  else if (moonPhase < 21) phaseStr = 'Full Moon';
-  else phaseStr = 'Last Quarter';
+  const { phase, emoji } = MOON_PHASES[Math.round(moonPhase / 45) % 8];
   
   return {
-    phase: phaseStr,
+    phase,
+    emoji,
     illumination: illumination.phase_fraction * 100
   };
+}
+
+export interface MoonUpPeriod {
+  riseTime: Date;
+  setTime: Date;
+}
+
+// Periods when the Moon is above the horizon that overlap [from, to]
+export function getMoonUpPeriods(from: Date, to: Date): MoonUpPeriod[] {
+  const observer = new Astronomy.Observer(
+    MT_LEMMON_LOCATION.latitude,
+    MT_LEMMON_LOCATION.longitude,
+    MT_LEMMON_LOCATION.elevation
+  );
+  const searchRise = (start: Date, limitDays: number) =>
+    Astronomy.SearchRiseSet(Astronomy.Body.Moon, observer, +1, start, limitDays)!.date;
+  const searchSet = (start: Date) =>
+    Astronomy.SearchRiseSet(Astronomy.Body.Moon, observer, -1, start, 2)!.date;
+  
+  // If the Moon sets before it next rises, it's already up at `from`, so start from the previous rise
+  const nextRise = searchRise(from, 2);
+  let riseTime = searchSet(from) < nextRise ? searchRise(from, -2) : nextRise;
+  
+  const periods: MoonUpPeriod[] = [];
+  while (riseTime < to) {
+    const setTime = searchSet(riseTime);
+    periods.push({ riseTime, setTime });
+    riseTime = searchRise(setTime, 2);
+  }
+  return periods;
 }
 
 export function getPlanetPosition(planet: string, date: Date): { ra: number; dec: number; altitude: number; azimuth: number } | null {

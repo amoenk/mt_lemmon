@@ -694,6 +694,7 @@ export const ObservationPlanner: React.FC = () => {
           <div className="gantt-section">
             <SimpleGanttChart
               observations={visibleObjects}
+              moonPhase={moonInfo}
               startTime={observationDate}
               endTime={observationEndDate}
               expandedRows={expandedRows}
