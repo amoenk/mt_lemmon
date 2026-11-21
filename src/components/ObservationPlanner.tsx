@@ -10,13 +10,15 @@ import {
   getPlanetPosition,
   calculateObjectTimings,
   getExposureRecommendations,
+  getSunTimes,
+  getDarkWindow,
   type PlannedObject
 } from '../utils/astronomy';
 import { SimpleGanttChart } from './SimpleGanttChart';
 import { FilterControls } from './FilterControls';
 import { ObservationTable } from './ObservationTable';
 
-const DEFAULT_OBSERVATION_DATE = '2026-12-29';
+const DEFAULT_OBSERVATION_DATE = '2027-01-09';
 
 export const ObservationPlanner: React.FC = () => {
   // Check URL params first, then localStorage, then defaults
@@ -82,10 +84,10 @@ export const ObservationPlanner: React.FC = () => {
     urlSettings?.selectedDate || loadSettingWithUrlParam('observationDate', 'date', DEFAULT_OBSERVATION_DATE)
   );
   const [startTime, setStartTime] = useState<string>(() => 
-    urlSettings?.startTime || loadSettingWithUrlParam('startTime', 'start', '22:00')
+    urlSettings?.startTime || loadSettingWithUrlParam('startTime', 'start', getDarkWindow(selectedDate).startTime)
   );
   const [endTime, setEndTime] = useState<string>(() => 
-    urlSettings?.endTime || loadSettingWithUrlParam('endTime', 'end', '06:00')
+    urlSettings?.endTime || loadSettingWithUrlParam('endTime', 'end', getDarkWindow(selectedDate).endTime)
   );
   const [minAltitude, setMinAltitude] = useState<number>(() =>
     urlSettings?.minAltitude || loadSettingWithUrlParam('minAltitude', 'alt', 15)
@@ -226,6 +228,20 @@ export const ObservationPlanner: React.FC = () => {
   }, [selectedDate, endTime, observationDate]);
   
   const moonInfo = useMemo(() => getMoonPhase(observationDate), [observationDate]);
+  const sunTimes = useMemo(() => getSunTimes(selectedDate), [selectedDate]);
+  const darkWindow = useMemo(() => getDarkWindow(selectedDate), [selectedDate]);
+  const isSyncedToDark = startTime === darkWindow.startTime && endTime === darkWindow.endTime;
+
+  const syncToDarkWindow = (date: string) => {
+    const darkWindow = getDarkWindow(date);
+    setStartTime(darkWindow.startTime);
+    setEndTime(darkWindow.endTime);
+  };
+
+  const changeDate = (date: string) => {
+    setSelectedDate(date);
+    syncToDarkWindow(date);
+  };
   
   const allObjects = useMemo((): PlannedObject[] => {
     const deepSky = deepSkyObjects.map(obj => {
@@ -441,67 +457,65 @@ export const ObservationPlanner: React.FC = () => {
       imagingTime: number; // minutes
     }> = [];
     
-    let currentTime = new Date(observationDate);
-    const windowEnd = new Date(observationEndDate);
-    let isFirstObject = true;
-    
-    // Go through objects in priority order
-    for (const obj of visibleObjects) {
-      if (currentTime >= windowEnd) break;
-      
-      // Add setup time between objects (but not before the first one)
-      if (!isFirstObject) {
-        currentTime = new Date(currentTime.getTime() + setupTime * 60 * 1000); // Add setup time between objects
-        if (currentTime >= windowEnd) break;
-      }
-      
-      // Check if object is observable at current time
+    const windowEnd = observationEndDate.getTime();
+    const stepMs = 5 * 60 * 1000;
+    const setupMs = setupTime * 60 * 1000;
+
+    const altitudeAt = (obj: PlannedObject, time: Date): number | null => {
       const ra = obj.type === 'planet' 
-        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, currentTime)?.ra : 0)
+        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, time)?.ra : 0)
         : raToDecimal(deepSkyObjects.find(d => d.name === obj.name)?.ra || {hours: 0, minutes: 0, seconds: 0});
       const dec = obj.type === 'planet'
-        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, currentTime)?.dec : 0)
+        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, time)?.dec : 0)
         : decToDecimal(deepSkyObjects.find(d => d.name === obj.name)?.dec || {degrees: 0, minutes: 0, seconds: 0});
-      
-      if (!ra || !dec) continue;
-      
-      const altitude = calculateAltitude(ra, dec, currentTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
-      
-      // Skip if object is too low
-      if (altitude < minAltitude) continue;
-      
-      // Calculate observation duration
-      // For first object, include setup. For subsequent objects, setup was already added above
-      const setupTimeForCalculation = setupTime; // Use the configurable setup time
-      const imagingTimeOnly = Math.round((obj.totalObservationTime || 70) - 10); // Still subtract 10 from total since that's built into the object's time
-      const totalTime = imagingTimeOnly; // Just the imaging time, setup already accounted for
-      
-      // Check if observation would extend beyond window end
-      const proposedEndTime = new Date(currentTime.getTime() + totalTime * 60 * 1000);
-      if (proposedEndTime > windowEnd) {
-        // Skip this object entirely - don't do partial observations
+      if (!ra || !dec) return null;
+      return calculateAltitude(ra, dec, time, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
+    };
+
+    // Imaging time only; setup is scheduled separately
+    const imagingMinutes = (obj: PlannedObject) => Math.round((obj.totalObservationTime || 70) - 10);
+
+    // Fits if it's above the minimum altitude at both ends of the imaging run and finishes inside the window
+    const fitsAt = (obj: PlannedObject, start: Date): boolean => {
+      const end = new Date(start.getTime() + imagingMinutes(obj) * 60 * 1000);
+      if (end.getTime() > windowEnd) return false;
+      const startAltitude = altitudeAt(obj, start);
+      const endAltitude = altitudeAt(obj, end);
+      return startAltitude !== null && endAltitude !== null
+        && startAltitude >= minAltitude && endAltitude >= minAltitude;
+    };
+
+    // Highest priority first, then highest score
+    const candidates = [...visibleObjects].sort((a, b) =>
+      b.priority - a.priority || b.observationScore - a.observationScore
+    );
+    const unscheduled = new Set(candidates.map(obj => obj.id));
+
+    // Walk forward through the night: at each slot take the best object that fits,
+    // otherwise wait a few minutes and try again
+    let currentTime = observationDate.getTime();
+    let isFirstObject = true;
+    while (unscheduled.size > 0) {
+      const slotStart = new Date(isFirstObject ? currentTime : currentTime + setupMs);
+      if (slotStart.getTime() >= windowEnd) break;
+
+      const obj = candidates.find(o => unscheduled.has(o.id) && fitsAt(o, slotStart));
+      if (!obj) {
+        currentTime += stepMs;
         continue;
       }
-      
-      // Check if object will remain visible for the duration
-      const endAltitude = calculateAltitude(ra, dec, proposedEndTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
-      
-      if (endAltitude < minAltitude) {
-        // Object will set during observation, skip for now
-        continue;
-      }
-      
-      // Schedule this observation
+
+      const imagingTimeOnly = imagingMinutes(obj);
+      const endTime = new Date(slotStart.getTime() + imagingTimeOnly * 60 * 1000);
       scheduled.push({
         objectId: obj.id,
-        startTime: new Date(currentTime),
-        endTime: proposedEndTime,
-        setupTime: isFirstObject ? 0 : setupTimeForCalculation, // No setup for first object, it's at start of session
+        startTime: slotStart,
+        endTime,
+        setupTime: isFirstObject ? 0 : setupTime, // No setup for first object, it's at start of session
         imagingTime: imagingTimeOnly
       });
-      
-      // Move current time forward
-      currentTime = proposedEndTime;
+      unscheduled.delete(obj.id);
+      currentTime = endTime.getTime();
       isFirstObject = false;
     }
     
@@ -623,8 +637,7 @@ export const ObservationPlanner: React.FC = () => {
     
     // Reset to defaults
     setSelectedDate(DEFAULT_OBSERVATION_DATE);
-    setStartTime('22:00');
-    setEndTime('06:00');
+    syncToDarkWindow(DEFAULT_OBSERVATION_DATE);
     setMinAltitude(15);
     setSetupTime(10);
     setDisabledObjects(new Set());
@@ -697,6 +710,9 @@ export const ObservationPlanner: React.FC = () => {
               moonPhase={moonInfo}
               startTime={observationDate}
               endTime={observationEndDate}
+              sunTimes={sunTimes}
+              isSyncedToDark={isSyncedToDark}
+              onSyncToDark={() => syncToDarkWindow(selectedDate)}
               expandedRows={expandedRows}
               scheduledObservations={scheduledObservations}
             />
@@ -711,7 +727,7 @@ export const ObservationPlanner: React.FC = () => {
           endTime={endTime}
           minAltitude={minAltitude}
           setupTime={setupTime}
-          onDateChange={setSelectedDate}
+          onDateChange={changeDate}
           onStartTimeChange={setStartTime}
           onEndTimeChange={setEndTime}
           onMinAltitudeChange={setMinAltitude}
