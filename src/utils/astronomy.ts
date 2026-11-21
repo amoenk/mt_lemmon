@@ -32,6 +32,13 @@ export function calculateAltitude(
   return hor.altitude;
 }
 
+// Relative thickness of atmosphere along the line of sight: 1 at the zenith, about 2 at 30°, about 2.9 at 20°.
+// Kasten & Young (1989), which stays accurate near the horizon where 1/sin(altitude) blows up.
+export function airmass(altitudeDegrees: number): number {
+  const altitudeRadians = altitudeDegrees * Math.PI / 180;
+  return 1 / (Math.sin(altitudeRadians) + 0.50572 * Math.pow(altitudeDegrees + 6.07995, -1.6364));
+}
+
 export function calculateAzimuth(
   ra: number, // hours
   dec: number, // degrees

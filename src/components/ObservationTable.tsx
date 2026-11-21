@@ -1,18 +1,13 @@
 import React from 'react';
 import { getExposureRecommendations, getMagnificationRecommendation, type PlannedObject, type CustomObjectSettings } from '../utils/astronomy';
 import { FilterRowsEditor } from './FilterRowsEditor';
+import type { ScheduledObservation } from '../utils/scheduler';
 import { MosaicControl, MosaicSummary } from './MosaicControl';
 
 interface ObservationTableProps {
   observations: PlannedObject[];
   expandedRows: Set<string>;
-  scheduledObservations?: Array<{
-    objectId: string;
-    startTime: Date;
-    endTime: Date;
-    setupTime: number;
-    imagingTime: number;
-  }>;
+  scheduledObservations?: ScheduledObservation[];
   unscheduledReasons: Record<string, string>;
   disabledObjects?: Set<string>;
   customSettings?: Record<string, CustomObjectSettings>;
@@ -189,6 +184,10 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                                 <div>
                                   <span className="text-gray-400">Setup:</span> {scheduled.setupTime} min,{' '}
                                   <span className="text-gray-400">Imaging:</span> {Math.round(scheduled.imagingTime)} min
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Airmass:</span> {scheduled.meanAirmass.toFixed(2)} avg,{' '}
+                                  <span className="text-gray-400">Altitude:</span> {scheduled.altitudeRange.min.toFixed(0)}°–{scheduled.altitudeRange.max.toFixed(0)}°
                                 </div>
                               </div>
                             );
@@ -460,6 +459,10 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                                     <div>
                                       <span className="text-gray-400">Setup:</span> {scheduled.setupTime} min,{' '}
                                       <span className="text-gray-400">Imaging:</span> {Math.round(scheduled.imagingTime)} min
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Airmass:</span> {scheduled.meanAirmass.toFixed(2)} avg,{' '}
+                                      <span className="text-gray-400">Altitude:</span> {scheduled.altitudeRange.min.toFixed(0)}°–{scheduled.altitudeRange.max.toFixed(0)}°
                                     </div>
                                   </div>
                                 );

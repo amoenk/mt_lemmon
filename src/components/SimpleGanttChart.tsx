@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { getMoonUpPeriods, type FilterSegment, type MoonPhaseInfo, type PlannedObject, type SunTimes } from '../utils/astronomy';
+import { getMoonUpPeriods, type MoonPhaseInfo, type PlannedObject, type SunTimes } from '../utils/astronomy';
+import type { ScheduledObservation } from '../utils/scheduler';
 import { FILTER_COLORS } from '../utils/filterColors';
 
 interface SimpleGanttChartProps {
@@ -11,14 +12,7 @@ interface SimpleGanttChartProps {
   isSyncedToDark: boolean;
   onSyncToDark: () => void;
   expandedRows: Set<string>;
-  scheduledObservations?: Array<{
-    objectId: string;
-    startTime: Date;
-    endTime: Date;
-    setupTime: number;
-    imagingTime: number;
-    segments: FilterSegment[];
-  }>;
+  scheduledObservations?: ScheduledObservation[];
 }
 
 export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
@@ -99,6 +93,12 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   const moonLabelClass = moonPhase.illumination > 70
     ? 'text-slate-900'
     : 'text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]';
+  
+  // Night-wide airmass, weighted by imaging time
+  const totalImaging = scheduledObservations.reduce((sum, s) => sum + s.imagingTime, 0);
+  const nightAirmass = totalImaging > 0
+    ? scheduledObservations.reduce((sum, s) => sum + s.meanAirmass * s.imagingTime, 0) / totalImaging
+    : null;
   
   // Get priority color
   const getPriorityColor = (priority: number): string => {
@@ -208,6 +208,11 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
         <h3 className="text-lg sm:text-xl font-bold">Observation Timeline</h3>
         <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-400">
           <span>{formatTime(startTime)} - {formatTime(endTime)} MST</span>
+          {nightAirmass !== null && (
+            <span title="Average airmass across all scheduled imaging, weighted by imaging time (1.0 = straight up)">
+              · avg airmass {nightAirmass.toFixed(2)}
+            </span>
+          )}
           {!isSyncedToDark && <button
             type="button"
             onClick={onSyncToDark}
@@ -545,7 +550,8 @@ Score: ${block.observationScore?.toFixed(1)}`}
                               }}
                               title={`${section.label}: ${formatTime(section.startTime)} - ${formatTime(section.endTime)}
 Scheduled: ${formatTime(scheduled.startTime)} - ${formatTime(scheduled.endTime)}
-Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
+Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m
+Airmass: ${scheduled.meanAirmass.toFixed(2)} avg (altitude ${scheduled.altitudeRange.min.toFixed(0)}°–${scheduled.altitudeRange.max.toFixed(0)}°)`}
                             />
                             </React.Fragment>
                           ));
