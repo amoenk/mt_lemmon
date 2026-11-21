@@ -1,11 +1,6 @@
 import React from 'react';
-import { getExposureRecommendations, getMagnificationRecommendation, type PlannedObject } from '../utils/astronomy';
-
-interface CustomObjectSettings {
-  imagingTime?: number;
-  filters?: string[];
-  priority?: number;
-}
+import { getExposureRecommendations, getMagnificationRecommendation, type PlannedObject, type CustomObjectSettings } from '../utils/astronomy';
+import { FilterRowsEditor } from './FilterRowsEditor';
 
 interface ObservationTableProps {
   observations: PlannedObject[];
@@ -220,17 +215,13 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                           <div className="font-semibold text-gray-300 mb-1">Imaging:</div>
                           <div className="space-y-1 text-sm">
                             <div>
-                              <span className="text-gray-400">Exposure Time:</span> {exposure.exposureTime}s
-                            </div>
-                            <div>
                               <span className="text-gray-400">Gain:</span> {exposure.gain}
                             </div>
                             <div>
-                              <span className="text-gray-400">Binning:</span> {exposure.binning}
-                            </div>
-                            <div>
-                              <span className="text-gray-400">Filter Sequence:</span>{' '}
-                              {(obj.activeFilters || exposure.filters).join(' → ')}
+                              <span className="text-gray-400">Filter Plan:</span>{' '}
+                              {obj.type === 'planet'
+                                ? obj.filterRows.map(row => row.filter).join(' → ')
+                                : obj.filterRows.map(row => `${row.filter} ${row.count}×${row.exposure}s${row.binning > 1 ? ` ${row.binning}×${row.binning}` : ''}`).join(' → ')}
                             </div>
                             <div className="text-xs text-gray-500 mt-2">
                               {exposure.notes}
@@ -290,81 +281,13 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                           </div>
                         </div>
                         
-                        <div>
-                          <label className="block text-sm text-gray-400 mb-1">
-                            Imaging Time (minutes, excludes 10min setup)
-                          </label>
-                          <input
-                            type="number"
-                            min="10"
-                            max="300"
-                            value={(() => {
-                              const customImagingTime = customSettings[obj.id]?.imagingTime;
-                              if (customImagingTime) {
-                                return customImagingTime - 10;
-                              }
-                              return Math.round(obj.totalObservationTime - 10);
-                            })()}
-                            onChange={(e) => {
-                              const newTime = parseInt(e.target.value) || 60;
-                              onUpdateSettings?.(obj.id, {
-                                ...customSettings[obj.id],
-                                imagingTime: newTime + 10
-                              });
-                            }}
-                            className="w-32 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm"
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm text-gray-400 mb-2">
-                            Active Filters
-                          </label>
-                          <div className="flex flex-wrap gap-2">
-                            {(() => {
-                              let allFilters: string[];
-                              if (obj.type === 'planet') {
-                                allFilters = ['Luminance', 'IR850', 'Red', 'Green', 'Blue', 'CH4'];
-                              } else if (obj.type === 'nebula' || obj.type === 'planetary_nebula' || obj.type === 'supernova_remnant') {
-                                allFilters = ['Luminance', 'Ha', 'OIII', 'SII', 'Red', 'Green', 'Blue'];
-                              } else {
-                                allFilters = ['Luminance', 'Red', 'Green', 'Blue', 'Ha'];
-                              }
-                              
-                              const activeFilters = obj.activeFilters || obj.exposure.filters;
-                              
-                              return allFilters.map((filter: string) => {
-                                const isActive = activeFilters.includes(filter);
-                                return (
-                                  <button
-                                    key={filter}
-                                    onClick={() => {
-                                      const currentFilters = customSettings[obj.id]?.filters || obj.exposure.filters;
-                                      let newFilters: string[];
-                                      if (isActive) {
-                                        newFilters = currentFilters.filter((f: string) => f !== filter);
-                                      } else {
-                                        newFilters = [...currentFilters, filter];
-                                      }
-                                      onUpdateSettings?.(obj.id, {
-                                        ...customSettings[obj.id],
-                                        filters: newFilters
-                                      });
-                                    }}
-                                    className={`px-2 py-1 rounded text-xs font-medium transition-all ${
-                                      isActive
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                                    }`}
-                                    disabled={isActive && activeFilters.length === 1}
-                                  >
-                                    {filter}
-                                  </button>
-                                );
-                              });
-                            })()}
-                          </div>
-                        </div>
+                        <FilterRowsEditor
+                          obj={obj}
+                          onChange={(filterRows) => onUpdateSettings?.(obj.id, {
+                            ...customSettings[obj.id],
+                            filterRows
+                          })}
+                        />
                         
                         {customSettings[obj.id] && (
                           <button
@@ -555,17 +478,13 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                               <div className="font-semibold text-gray-300 mb-1">Imaging:</div>
                               <div className="space-y-1 text-sm">
                                 <div>
-                                  <span className="text-gray-400">Exposure Time:</span> {exposure.exposureTime}s
-                                </div>
-                                <div>
                                   <span className="text-gray-400">Gain:</span> {exposure.gain}
                                 </div>
                                 <div>
-                                  <span className="text-gray-400">Binning:</span> {exposure.binning}
-                                </div>
-                                <div>
-                                  <span className="text-gray-400">Filter Sequence:</span>{' '}
-                                  {(obj.activeFilters || exposure.filters).join(' → ')}
+                                  <span className="text-gray-400">Filter Plan:</span>{' '}
+                                  {obj.type === 'planet'
+                                ? obj.filterRows.map(row => row.filter).join(' → ')
+                                : obj.filterRows.map(row => `${row.filter} ${row.count}×${row.exposure}s${row.binning > 1 ? ` ${row.binning}×${row.binning}` : ''}`).join(' → ')}
                                 </div>
                                 <div className="text-xs text-gray-500 mt-2">
                                   {exposure.notes}
@@ -631,84 +550,13 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                               </div>
                             </div>
                             
-                            <div>
-                              <label className="block text-sm text-gray-400 mb-1">
-                                Imaging Time (minutes, excludes 10min setup)
-                              </label>
-                              <input
-                                type="number"
-                                min="10"
-                                max="300"
-                                value={(() => {
-                                  const customImagingTime = customSettings[obj.id]?.imagingTime;
-                                  if (customImagingTime) {
-                                    // Custom setting exists, subtract setup time for display
-                                    return customImagingTime - 10;
-                                  }
-                                  // Default: total time minus setup time
-                                  return Math.round(obj.totalObservationTime - 10);
-                                })()}
-                                onChange={(e) => {
-                                  const newTime = parseInt(e.target.value) || 60;
-                                  onUpdateSettings?.(obj.id, {
-                                    ...customSettings[obj.id],
-                                    imagingTime: newTime + 10 // Add setup time back
-                                  });
-                                }}
-                                className="w-32 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm"
-                              />
-                            </div>
-                            
-                            <div>
-                              <label className="block text-sm text-gray-400 mb-2">
-                                Active Filters
-                              </label>
-                              <div className="flex flex-wrap gap-2">
-                                {(() => {
-                                  // Define all available filters based on object type
-                                  let allFilters: string[];
-                                  if (obj.type === 'planet') {
-                                    allFilters = ['Luminance', 'IR850', 'Red', 'Green', 'Blue', 'CH4'];
-                                  } else if (obj.type === 'nebula' || obj.type === 'planetary_nebula' || obj.type === 'supernova_remnant') {
-                                    allFilters = ['Luminance', 'Ha', 'OIII', 'SII', 'Red', 'Green', 'Blue'];
-                                  } else {
-                                    allFilters = ['Luminance', 'Red', 'Green', 'Blue', 'Ha'];
-                                  }
-                                  
-                                  const activeFilters = obj.activeFilters || obj.exposure.filters;
-                                  
-                                  return allFilters.map((filter: string) => {
-                                    const isActive = activeFilters.includes(filter);
-                                    return (
-                                      <button
-                                        key={filter}
-                                        onClick={() => {
-                                          const currentFilters = customSettings[obj.id]?.filters || obj.exposure.filters;
-                                          let newFilters: string[];
-                                          if (isActive) {
-                                            newFilters = currentFilters.filter((f: string) => f !== filter);
-                                          } else {
-                                            newFilters = [...currentFilters, filter];
-                                          }
-                                          onUpdateSettings?.(obj.id, {
-                                            ...customSettings[obj.id],
-                                            filters: newFilters
-                                          });
-                                        }}
-                                        className={`px-3 py-1 rounded text-sm font-medium transition-all ${
-                                          isActive
-                                            ? 'bg-blue-600 text-white'
-                                            : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                                        }`}
-                                        disabled={isActive && activeFilters.length === 1}
-                                      >
-                                        {filter}
-                                      </button>
-                                    );
-                                  });
-                                })()}
-                              </div>
-                            </div>
+                            <FilterRowsEditor
+                              obj={obj}
+                              onChange={(filterRows) => onUpdateSettings?.(obj.id, {
+                                ...customSettings[obj.id],
+                                filterRows
+                              })}
+                            />
                             
                             {customSettings[obj.id] && (
                               <button

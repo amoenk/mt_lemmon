@@ -225,6 +225,65 @@ export interface ExposureSettings {
   notes: string;
 }
 
+// One line of a target's imaging plan: `count` frames of `exposure` seconds through `filter`
+export interface FilterRow {
+  filter: string;
+  exposure: number; // seconds per frame
+  count: number;
+  binning: number; // 1 = 1x1, 2 = 2x2
+}
+
+// Per-target overrides saved in localStorage and share links
+export interface CustomObjectSettings {
+  priority?: number; // 1-10
+  filterRows?: FilterRow[];
+}
+
+export const DEFAULT_FRAMES_PER_FILTER = 10;
+export const DOWNLOAD_MINUTES_PER_FRAME = 0.5;
+
+export function defaultFilterRows(exposure: ExposureSettings): FilterRow[] {
+  return exposure.filters.map(filter => ({
+    filter,
+    exposure: exposure.exposureTime,
+    count: DEFAULT_FRAMES_PER_FILTER,
+    binning: 1
+  }));
+}
+
+// Number of times the wheel moves while running the rows in order
+function filterChanges(rows: FilterRow[]): number {
+  return rows.filter((row, i) => i > 0 && row.filter !== rows[i - 1].filter).length;
+}
+
+function rowMinutes(row: FilterRow): number {
+  return row.count * (row.exposure / 60 + DOWNLOAD_MINUTES_PER_FRAME);
+}
+
+// Total imaging time for a target's rows, including filter changes (setup between targets is separate)
+export function sequenceMinutes(rows: FilterRow[], filterChangeMinutes: number): number {
+  return rows.reduce((sum, row) => sum + rowMinutes(row), 0) + filterChanges(rows) * filterChangeMinutes;
+}
+
+export interface FilterSegment {
+  filter: string;
+  startTime: Date;
+  endTime: Date;
+}
+
+// When each row runs, starting at `start`. A filter change happens before any row whose filter differs from the previous row's.
+export function filterSegments(rows: FilterRow[], start: Date, filterChangeMinutes: number): FilterSegment[] {
+  let time = start.getTime();
+  return rows.map((row, i) => {
+    if (i > 0 && row.filter !== rows[i - 1].filter) {
+      time += filterChangeMinutes * 60000;
+    }
+    const startTime = new Date(time);
+    time += rowMinutes(row) * 60000;
+    return { filter: row.filter, startTime, endTime: new Date(time) };
+  });
+}
+
 export interface PlannedObject {
   id: string;
   name: string;
@@ -239,9 +298,9 @@ export interface PlannedObject {
   maxAltitudeDuringWindow: number;
   exposure: ExposureSettings;
   activeFilters: string[];
-  customImagingTime?: number;
+  filterRows: FilterRow[];
   isVisible: boolean;
-  totalObservationTime: number;
+  totalObservationTime: number; // minutes of imaging, excluding setup between targets
   observationScore: number;
   observableDuration: number;
 }

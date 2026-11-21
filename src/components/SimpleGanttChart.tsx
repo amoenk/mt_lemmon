@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { getMoonUpPeriods, type MoonPhaseInfo, type PlannedObject, type SunTimes } from '../utils/astronomy';
+import { getMoonUpPeriods, type FilterSegment, type MoonPhaseInfo, type PlannedObject, type SunTimes } from '../utils/astronomy';
+import { FILTER_COLORS } from '../utils/filterColors';
 
 interface SimpleGanttChartProps {
   observations: PlannedObject[];
@@ -16,6 +17,7 @@ interface SimpleGanttChartProps {
     endTime: Date;
     setupTime: number;
     imagingTime: number;
+    segments: FilterSegment[];
   }>;
 }
 
@@ -507,24 +509,37 @@ Score: ${block.observationScore?.toFixed(1)}`}
                           />
                         )}
                         
-                        {/* Scheduled observation window */}
-                        {scheduled && (
-                          <div
-                            className="absolute rounded-sm z-30"
-                            style={{
-                              left: `${((scheduled.startTime.getTime() - block.blockStart.getTime()) / 
-                                       (block.blockEnd.getTime() - block.blockStart.getTime())) * 100}%`,
-                              width: `${((scheduled.endTime.getTime() - scheduled.startTime.getTime()) / 
-                                        (block.blockEnd.getTime() - block.blockStart.getTime())) * 100}%`,
-                              bottom: '0',
-                              height: '6px',
-                              backgroundColor: '#6495ED', // Cornflower blue
-                              boxShadow: '0 -1px 2px rgba(100, 149, 237, 0.5)'
-                            }}
-                            title={`Scheduled: ${formatTime(scheduled.startTime)} - ${formatTime(scheduled.endTime)}
+                        {/* Scheduled observation window, split into one colored section per filter run */}
+                        {scheduled && (() => {
+                          const blockMs = block.blockEnd.getTime() - block.blockStart.getTime();
+                          const percentInBlock = (date: Date) => ((date.getTime() - block.blockStart.getTime()) / blockMs) * 100;
+                          const sections = scheduled.segments.length > 0
+                            ? scheduled.segments.map(segment => ({
+                                key: segment.startTime.getTime(),
+                                startTime: segment.startTime,
+                                endTime: segment.endTime,
+                                color: FILTER_COLORS[segment.filter],
+                                label: segment.filter
+                              }))
+                            : [{ key: 0, startTime: scheduled.startTime, endTime: scheduled.endTime, color: '#6495ED', label: 'Imaging' }];
+                          return sections.map(section => (
+                            <div
+                              key={section.key}
+                              className="absolute rounded-sm z-30"
+                              style={{
+                                left: `${percentInBlock(section.startTime)}%`,
+                                width: `${percentInBlock(section.endTime) - percentInBlock(section.startTime)}%`,
+                                bottom: '0',
+                                height: '6px',
+                                backgroundColor: section.color,
+                                boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.7)' // outline keeps a red filter visible on a red priority bar
+                              }}
+                              title={`${section.label}: ${formatTime(section.startTime)} - ${formatTime(section.endTime)}
+Scheduled: ${formatTime(scheduled.startTime)} - ${formatTime(scheduled.endTime)}
 Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
-                          />
-                        )}
+                            />
+                          ));
+                        })()}
                       </div>
                     );
                   })}
@@ -579,8 +594,13 @@ Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
               <span>Transit</span>
             </div>
             <div className="flex items-center gap-1 sm:gap-2">
-              <div className="w-3 sm:w-4 h-1 rounded-sm" style={{ backgroundColor: '#6495ED' }}></div>
-              <span>Scheduled</span>
+              <div className="w-3 sm:w-4 h-1 rounded-sm flex overflow-hidden">
+                <div className="flex-1" style={{ backgroundColor: FILTER_COLORS.Luminance }}></div>
+                <div className="flex-1" style={{ backgroundColor: FILTER_COLORS.Red }}></div>
+                <div className="flex-1" style={{ backgroundColor: FILTER_COLORS.Blue }}></div>
+              </div>
+              <span className="hidden sm:inline">Scheduled (by filter)</span>
+              <span className="sm:hidden">Scheduled</span>
             </div>
           </div>
       </>
