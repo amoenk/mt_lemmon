@@ -12,6 +12,34 @@ const filtersForType = (type: string): string[] => {
   return ['Luminance', 'Red', 'Green', 'Blue', 'Ha'];
 };
 
+// Positive whole-number input. Keeps what's being typed (including an empty field) as a draft
+// and only commits values of 1 or more, so clearing "10" and typing "20" gives 20.
+const PositiveNumberInput: React.FC<{
+  value: number;
+  onCommit: (value: number) => void;
+  className: string;
+  label: string;
+}> = ({ value, onCommit, className, label }) => {
+  const [draft, setDraft] = React.useState<string | null>(null);
+  return (
+    <input
+      type="number"
+      min="1"
+      value={draft ?? value}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const parsed = Number(e.target.value);
+        if (Number.isInteger(parsed) && parsed >= 1) {
+          onCommit(parsed);
+        }
+      }}
+      onBlur={() => setDraft(null)}
+      className={className}
+      aria-label={label}
+    />
+  );
+};
+
 interface FilterRowsEditorProps {
   obj: PlannedObject;
   onChange: (rows: FilterRow[]) => void;
@@ -51,22 +79,18 @@ export const FilterRowsEditor: React.FC<FilterRowsEditorProps> = ({ obj, onChang
             </select>
             {!isPlanet && (
               <div className="flex items-center gap-1.5 w-full sm:w-auto pl-4 sm:pl-0 order-last sm:order-none">
-                <input
-                  type="number"
-                  min="1"
+                <PositiveNumberInput
                   value={row.count}
-                  onChange={(e) => updateRow(i, { count: Math.max(1, Number(e.target.value)) })}
+                  onCommit={(count) => updateRow(i, { count })}
                   className={`${inputClass} w-14`}
-                  aria-label="Frames"
+                  label="Frames"
                 />
                 <span className="text-gray-500">×</span>
-                <input
-                  type="number"
-                  min="1"
+                <PositiveNumberInput
                   value={row.exposure}
-                  onChange={(e) => updateRow(i, { exposure: Math.max(1, Number(e.target.value)) })}
+                  onCommit={(exposure) => updateRow(i, { exposure })}
                   className={`${inputClass} w-16`}
-                  aria-label="Exposure seconds"
+                  label="Exposure seconds"
                 />
                 <span className="text-gray-500">s</span>
                 <select
