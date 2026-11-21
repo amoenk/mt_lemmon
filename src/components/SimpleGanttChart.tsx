@@ -513,18 +513,27 @@ Score: ${block.observationScore?.toFixed(1)}`}
                         {scheduled && (() => {
                           const blockMs = block.blockEnd.getTime() - block.blockStart.getTime();
                           const percentInBlock = (date: Date) => ((date.getTime() - block.blockStart.getTime()) / blockMs) * 100;
+                          const positions = Math.max(0, ...scheduled.segments.map(segment => segment.position));
                           const sections = scheduled.segments.length > 0
-                            ? scheduled.segments.map(segment => ({
+                            ? scheduled.segments.map((segment, i) => ({
                                 key: segment.startTime.getTime(),
                                 startTime: segment.startTime,
                                 endTime: segment.endTime,
                                 color: FILTER_COLORS[segment.filter],
-                                label: segment.filter
+                                label: positions > 1 ? `Position ${segment.position}/${positions} · ${segment.filter}` : segment.filter,
+                                // First section of each mosaic position after the first gets a tick mark
+                                startsPosition: segment.position > 1 && scheduled.segments[i - 1].position !== segment.position
                               }))
-                            : [{ key: 0, startTime: scheduled.startTime, endTime: scheduled.endTime, color: '#6495ED', label: 'Imaging' }];
+                            : [{ key: 0, startTime: scheduled.startTime, endTime: scheduled.endTime, color: '#6495ED', label: 'Imaging', startsPosition: false }];
                           return sections.map(section => (
+                            <React.Fragment key={section.key}>
+                            {section.startsPosition && (
+                              <div
+                                className="absolute z-30 w-0.5 bg-white/80"
+                                style={{ left: `${percentInBlock(section.startTime)}%`, bottom: '0', height: '12px', transform: 'translateX(-1px)' }}
+                              />
+                            )}
                             <div
-                              key={section.key}
                               className="absolute rounded-sm z-30"
                               style={{
                                 left: `${percentInBlock(section.startTime)}%`,
@@ -538,6 +547,7 @@ Score: ${block.observationScore?.toFixed(1)}`}
 Scheduled: ${formatTime(scheduled.startTime)} - ${formatTime(scheduled.endTime)}
 Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
                             />
+                            </React.Fragment>
                           ));
                         })()}
                       </div>

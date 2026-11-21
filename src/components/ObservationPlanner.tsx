@@ -13,8 +13,9 @@ import {
   getSunTimes,
   getDarkWindow,
   defaultFilterRows,
-  sequenceMinutes,
+  targetMinutes,
   filterSegments,
+  SINGLE_POSITION,
   type PlannedObject,
   type CustomObjectSettings,
   type FilterSegment
@@ -25,6 +26,7 @@ import { ObservationTable } from './ObservationTable';
 
 const DEFAULT_OBSERVATION_DATE = '2027-01-09';
 const DEFAULT_FILTER_CHANGE_MINUTES = 1;
+const DEFAULT_POSITION_OVERHEAD_MINUTES = 2;
 const SHARE_VERSION = 2;
 
 // Settings saved before filter rows (share v1, old localStorage key) stored a plain filter list
@@ -95,6 +97,7 @@ export const ObservationPlanner: React.FC = () => {
             minAltitude: parsed.ma || 15,
             setupTime: parsed.setup || 10,
             filterChangeTime: parsed.v === 1 ? DEFAULT_FILTER_CHANGE_MINUTES : parsed.fc,
+            positionOverhead: parsed.po ?? DEFAULT_POSITION_OVERHEAD_MINUTES,
             hiddenObjects: new Set<string>(parsed.h || []),
             customSettings: parsed.v === 1 ? migrateCustomSettingsV1(parsed.cs || {}) : parsed.cs
           };
@@ -141,6 +144,10 @@ export const ObservationPlanner: React.FC = () => {
 
   const [filterChangeTime, setFilterChangeTime] = useState<number>(() =>
     urlSettings?.filterChangeTime ?? loadSettingWithUrlParam('filterChangeTime', 'fc', DEFAULT_FILTER_CHANGE_MINUTES)
+  );
+
+  const [positionOverhead, setPositionOverhead] = useState<number>(() =>
+    urlSettings?.positionOverhead ?? loadSettingWithUrlParam('positionOverhead', 'po', DEFAULT_POSITION_OVERHEAD_MINUTES)
   );
 
   const [customSettings, setCustomSettings] = useState<Record<string, CustomObjectSettings>>(() => {
@@ -195,6 +202,10 @@ export const ObservationPlanner: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('filterChangeTime', JSON.stringify(filterChangeTime));
   }, [filterChangeTime]);
+
+  useEffect(() => {
+    localStorage.setItem('positionOverhead', JSON.stringify(positionOverhead));
+  }, [positionOverhead]);
 
   useEffect(() => {
     localStorage.setItem('customObjectSettingsV2', JSON.stringify(customSettings));
@@ -306,7 +317,8 @@ export const ObservationPlanner: React.FC = () => {
       const objectCustomSettings = customSettings[obj.name];
       const filterRows = objectCustomSettings?.filterRows ?? defaultFilterRows(exposure);
       const activeFilters = [...new Set(filterRows.map(row => row.filter))];
-      const totalObservationTime = sequenceMinutes(filterRows, filterChangeTime);
+      const mosaic = objectCustomSettings?.mosaic ?? SINGLE_POSITION;
+      const totalObservationTime = targetMinutes(filterRows, mosaic, filterChangeTime, positionOverhead);
       
       // Check if object is visible during our observation window
       let isVisible = false;
@@ -366,6 +378,7 @@ export const ObservationPlanner: React.FC = () => {
         exposure,
         activeFilters,
         filterRows,
+        mosaic,
         isVisible,
         totalObservationTime,
         observationScore,
@@ -444,6 +457,7 @@ export const ObservationPlanner: React.FC = () => {
           exposure,
           activeFilters,
           filterRows,
+          mosaic: SINGLE_POSITION,
           isVisible,
           totalObservationTime,
           observationScore,
@@ -467,7 +481,7 @@ export const ObservationPlanner: React.FC = () => {
       
       return aTransitTime - bTransitTime;
     });
-  }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime]);
+  }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime, positionOverhead]);
 
   const visibleObjects = allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id));
 
@@ -538,7 +552,7 @@ export const ObservationPlanner: React.FC = () => {
         setupTime: isFirstObject ? 0 : setupTime, // No setup for first object, it's at start of session
         imagingTime: imagingTimeOnly,
         // Planets are video captures with no per-frame plan to break down
-        segments: obj.type === 'planet' ? [] : filterSegments(obj.filterRows, slotStart, filterChangeTime)
+        segments: obj.type === 'planet' ? [] : filterSegments(obj.filterRows, obj.mosaic, slotStart, filterChangeTime, positionOverhead)
       });
       unscheduled.delete(obj.id);
       currentTime = endTime.getTime();
@@ -546,7 +560,26 @@ export const ObservationPlanner: React.FC = () => {
     }
     
     return scheduled;
-  }, [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime]);
+  }, [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime, positionOverhead]);
+
+  // Why each visible, enabled target missed the schedule
+  const unscheduledReasons = useMemo(() => {
+    const windowStart = observationDate.getTime();
+    const windowEnd = observationEndDate.getTime();
+    const reasons: Record<string, string> = {};
+    for (const obj of visibleObjects) {
+      if (scheduledObservations.some(s => s.objectId === obj.id)) continue;
+      const { riseTime, setTime, isCircumpolar } = obj.timings;
+      const availableMinutes = isCircumpolar || !riseTime || !setTime
+        ? (windowEnd - windowStart) / 60000
+        : (Math.min(setTime.getTime(), windowEnd) - Math.max(riseTime.getTime(), windowStart)) / 60000;
+      const needed = Math.round(obj.totalObservationTime);
+      reasons[obj.id] = needed > availableMinutes
+        ? `Too long to fit: needs ${needed} min, but it's above ${minAltitude}° for only ${Math.max(0, Math.round(availableMinutes))} min tonight`
+        : `No free slot: other targets fill the time it's up (needs ${needed} min)`;
+    }
+    return reasons;
+  }, [visibleObjects, scheduledObservations, observationDate, observationEndDate, minAltitude]);
 
   const toggleExpanded = (id: string) => {
     const newExpanded = new Set(expandedRows);
@@ -584,6 +617,7 @@ export const ObservationPlanner: React.FC = () => {
       ma: minAltitude,
       setup: setupTime,
       fc: filterChangeTime,
+      po: positionOverhead,
       h: Array.from(disabledObjects),
       cs: customSettings
     };
@@ -637,6 +671,7 @@ export const ObservationPlanner: React.FC = () => {
       setMinAltitude(settings.ma || 15);
       setSetupTime(settings.setup || 10); // Default to 10 if not present (backwards compatibility)
       setFilterChangeTime(settings.v === 1 ? DEFAULT_FILTER_CHANGE_MINUTES : settings.fc);
+      setPositionOverhead(settings.po ?? DEFAULT_POSITION_OVERHEAD_MINUTES);
       setDisabledObjects(new Set(settings.h || []));
       setCustomSettings(settings.v === 1 ? migrateCustomSettingsV1(settings.cs || {}) : settings.cs);
       
@@ -662,6 +697,7 @@ export const ObservationPlanner: React.FC = () => {
     localStorage.removeItem('setupTime');
     localStorage.removeItem('disabledObjects');
     localStorage.removeItem('filterChangeTime');
+    localStorage.removeItem('positionOverhead');
     localStorage.removeItem('customObjectSettingsV2');
     
     // Reset to defaults
@@ -670,6 +706,7 @@ export const ObservationPlanner: React.FC = () => {
     setMinAltitude(15);
     setSetupTime(10);
     setFilterChangeTime(DEFAULT_FILTER_CHANGE_MINUTES);
+    setPositionOverhead(DEFAULT_POSITION_OVERHEAD_MINUTES);
     setDisabledObjects(new Set());
     setCustomSettings({});
   };
@@ -758,12 +795,14 @@ export const ObservationPlanner: React.FC = () => {
           minAltitude={minAltitude}
           setupTime={setupTime}
           filterChangeTime={filterChangeTime}
+          positionOverhead={positionOverhead}
           onDateChange={changeDate}
           onStartTimeChange={setStartTime}
           onEndTimeChange={setEndTime}
           onMinAltitudeChange={setMinAltitude}
           onSetupTimeChange={setSetupTime}
           onFilterChangeTimeChange={setFilterChangeTime}
+          onPositionOverheadChange={setPositionOverhead}
           />
         </div>
 
@@ -808,6 +847,7 @@ export const ObservationPlanner: React.FC = () => {
           observations={allObjects}
           expandedRows={expandedRows}
           scheduledObservations={scheduledObservations}
+          unscheduledReasons={unscheduledReasons}
           disabledObjects={disabledObjects}
           customSettings={customSettings}
           onToggleExpanded={toggleExpanded}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { getExposureRecommendations, getMagnificationRecommendation, type PlannedObject, type CustomObjectSettings } from '../utils/astronomy';
 import { FilterRowsEditor } from './FilterRowsEditor';
+import { MosaicControl } from './MosaicControl';
 
 interface ObservationTableProps {
   observations: PlannedObject[];
@@ -12,6 +13,7 @@ interface ObservationTableProps {
     setupTime: number;
     imagingTime: number;
   }>;
+  unscheduledReasons: Record<string, string>;
   disabledObjects?: Set<string>;
   customSettings?: Record<string, CustomObjectSettings>;
   onToggleExpanded: (id: string) => void;
@@ -23,6 +25,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
   observations,
   expandedRows,
   scheduledObservations = [],
+  unscheduledReasons,
   disabledObjects = new Set(),
   customSettings = {},
   onToggleExpanded,
@@ -88,6 +91,9 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                       {customSettings[obj.id] && Object.keys(customSettings[obj.id]).length > 0 && (
                         <span className="text-xs text-blue-400 ml-2">(Custom)</span>
                       )}
+                      {unscheduledReasons[obj.id] && (
+                        <div className="text-xs text-amber-400 mt-1">⚠ Not scheduled: {unscheduledReasons[obj.id]}</div>
+                      )}
                     </div>
                     <div className="text-sm text-gray-400 mt-1">
                       {obj.type} • <span className={getPriorityColor(obj.priority)}>P{obj.priority}</span>
@@ -123,6 +129,18 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                         ↑{formatTime(obj.timings.riseTime)} ↓{formatTime(obj.timings.setTime)}
                       </div>
                     )}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-gray-500">Size / Mosaic:</span>
+                  <div className="font-medium">
+                    <MosaicControl
+                      obj={obj}
+                      onChange={(mosaic) => onUpdateSettings?.(obj.id, {
+                        ...customSettings[obj.id],
+                        mosaic
+                      })}
+                    />
                   </div>
                 </div>
               </div>
@@ -348,6 +366,9 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                     {customSettings[obj.id] && Object.keys(customSettings[obj.id]).length > 0 && (
                       <span className="text-xs text-blue-400 ml-2">(Custom)</span>
                     )}
+                    {unscheduledReasons[obj.id] && (
+                      <div className="text-xs text-amber-400 mt-1 max-w-xs">⚠ Not scheduled: {unscheduledReasons[obj.id]}</div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-400">{obj.type}</td>
                   <td className="px-4 py-3 text-sm">
@@ -380,7 +401,13 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                     {obj.maxAltitudeDuringWindow ? obj.maxAltitudeDuringWindow.toFixed(0) : obj.timings.transitAltitude.toFixed(0)}°
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    {obj.size ? `${obj.size.width}'×${obj.size.height}'` : 'N/A'}
+                    <MosaicControl
+                      obj={obj}
+                      onChange={(mosaic) => onUpdateSettings?.(obj.id, {
+                      ...customSettings[obj.id],
+                      mosaic
+                    })}
+                    />
                   </td>
                   <td className="px-4 py-3 text-sm">
                     {obj.magnitude ? obj.magnitude.toFixed(1) : 'N/A'}

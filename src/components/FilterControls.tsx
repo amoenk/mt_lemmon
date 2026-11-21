@@ -7,12 +7,14 @@ interface FilterControlsProps {
   minAltitude: number;
   setupTime: number;
   filterChangeTime: number;
+  positionOverhead: number;
   onDateChange: (date: string) => void;
   onStartTimeChange: (time: string) => void;
   onEndTimeChange: (time: string) => void;
   onMinAltitudeChange: (altitude: number) => void;
   onSetupTimeChange: (time: number) => void;
   onFilterChangeTimeChange: (time: number) => void;
+  onPositionOverheadChange: (time: number) => void;
 }
 
 export const FilterControls: React.FC<FilterControlsProps> = ({
@@ -22,12 +24,14 @@ export const FilterControls: React.FC<FilterControlsProps> = ({
   minAltitude,
   setupTime,
   filterChangeTime,
+  positionOverhead,
   onDateChange,
   onStartTimeChange,
   onEndTimeChange,
   onMinAltitudeChange,
   onSetupTimeChange,
-  onFilterChangeTimeChange
+  onFilterChangeTimeChange,
+  onPositionOverheadChange
 }) => {
   return (
     <div className="bg-gray-900 p-4 sm:p-6 rounded-lg">
@@ -124,6 +128,24 @@ export const FilterControls: React.FC<FilterControlsProps> = ({
           />
           <div className="text-xs text-gray-500 mt-1">
             Wheel move plus refocus, each time the filter changes within a target
+          </div>
+        </div>
+        
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Mosaic Position Change: {positionOverhead} min
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="10"
+            step="0.5"
+            value={positionOverhead}
+            onChange={(e) => onPositionOverheadChange(Number(e.target.value))}
+            className="w-full"
+          />
+          <div className="text-xs text-gray-500 mt-1">
+            Slew, plate-solve, and settle when moving to the next mosaic position
           </div>
         </div>
       </div>

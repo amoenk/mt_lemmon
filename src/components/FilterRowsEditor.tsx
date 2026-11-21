@@ -1,6 +1,7 @@
 import React from 'react';
 import { DEFAULT_FRAMES_PER_FILTER, type FilterRow, type PlannedObject } from '../utils/astronomy';
 import { FILTER_COLORS } from '../utils/filterColors';
+import { PositiveNumberInput } from './PositiveNumberInput';
 
 const filtersForType = (type: string): string[] => {
   if (type === 'planet') {
@@ -10,34 +11,6 @@ const filtersForType = (type: string): string[] => {
     return ['Luminance', 'Ha', 'OIII', 'SII', 'Red', 'Green', 'Blue'];
   }
   return ['Luminance', 'Red', 'Green', 'Blue', 'Ha'];
-};
-
-// Positive whole-number input. Keeps what's being typed (including an empty field) as a draft
-// and only commits values of 1 or more, so clearing "10" and typing "20" gives 20.
-const PositiveNumberInput: React.FC<{
-  value: number;
-  onCommit: (value: number) => void;
-  className: string;
-  label: string;
-}> = ({ value, onCommit, className, label }) => {
-  const [draft, setDraft] = React.useState<string | null>(null);
-  return (
-    <input
-      type="number"
-      min="1"
-      value={draft ?? value}
-      onChange={(e) => {
-        setDraft(e.target.value);
-        const parsed = Number(e.target.value);
-        if (Number.isInteger(parsed) && parsed >= 1) {
-          onCommit(parsed);
-        }
-      }}
-      onBlur={() => setDraft(null)}
-      className={className}
-      aria-label={label}
-    />
-  );
 };
 
 interface FilterRowsEditorProps {
