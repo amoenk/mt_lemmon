@@ -232,10 +232,40 @@ export interface FilterRow {
   binning: number; // 1 = 1x1, 2 = 2x2
 }
 
+// Mosaic grid: w columns × h rows of camera positions, centered on the target
+export interface Mosaic {
+  w: number;
+  h: number;
+}
+
 // Per-target overrides saved in localStorage and share links
 export interface CustomObjectSettings {
   priority?: number; // 1-10
   filterRows?: FilterRow[];
+  mosaic?: Mosaic;
+}
+
+// Schulman 32" (f/7, 5695 mm) with SkyCenter's STX-16803 (4096 × 9 µm = 36.864 mm square sensor)
+const TELESCOPE_FOCAL_LENGTH_MM = 5695;
+const SENSOR_SIZE_MM = 36.864;
+export const FIELD_OF_VIEW_ARCMIN =
+  2 * Math.atan(SENSOR_SIZE_MM / 2 / TELESCOPE_FOCAL_LENGTH_MM) * (180 / Math.PI) * 60;
+export const MOSAIC_OVERLAP = 0.1;
+export const SINGLE_POSITION: Mosaic = { w: 1, h: 1 };
+
+// Sky covered by `positions` frames in a line, each overlapping the next by MOSAIC_OVERLAP
+const coverageArcmin = (positions: number): number =>
+  FIELD_OF_VIEW_ARCMIN * (positions - MOSAIC_OVERLAP * (positions - 1));
+
+export function mosaicCoverage(mosaic: Mosaic): { width: number; height: number } {
+  return { width: coverageArcmin(mosaic.w), height: coverageArcmin(mosaic.h) };
+}
+
+// Smallest grid whose coverage contains the target's size
+export function suggestedMosaic(size: { width: number; height: number }): Mosaic {
+  const positionsFor = (arcmin: number) =>
+    Math.max(1, Math.ceil((arcmin - FIELD_OF_VIEW_ARCMIN) / (FIELD_OF_VIEW_ARCMIN * (1 - MOSAIC_OVERLAP))) + 1);
+  return { w: positionsFor(size.width), h: positionsFor(size.height) };
 }
 
 export const DEFAULT_FRAMES_PER_FILTER = 10;
@@ -264,23 +294,51 @@ export function sequenceMinutes(rows: FilterRow[], filterChangeMinutes: number):
   return rows.reduce((sum, row) => sum + rowMinutes(row), 0) + filterChanges(rows) * filterChangeMinutes;
 }
 
+// Total time for a target: the filter sequence at every mosaic position, plus moving between positions.
+// Getting to the first position is covered by the setup time between targets.
+export function targetMinutes(
+  rows: FilterRow[],
+  mosaic: Mosaic,
+  filterChangeMinutes: number,
+  positionOverheadMinutes: number
+): number {
+  const positions = mosaic.w * mosaic.h;
+  return positions * sequenceMinutes(rows, filterChangeMinutes) + (positions - 1) * positionOverheadMinutes;
+}
+
 export interface FilterSegment {
   filter: string;
+  position: number; // 1-based mosaic position
   startTime: Date;
   endTime: Date;
 }
 
-// When each row runs, starting at `start`. A filter change happens before any row whose filter differs from the previous row's.
-export function filterSegments(rows: FilterRow[], start: Date, filterChangeMinutes: number): FilterSegment[] {
+// When each row runs at each mosaic position, starting at `start`. All filters are finished at one
+// position before moving to the next. Within a position, a filter change happens before any row
+// whose filter differs from the previous row's.
+export function filterSegments(
+  rows: FilterRow[],
+  mosaic: Mosaic,
+  start: Date,
+  filterChangeMinutes: number,
+  positionOverheadMinutes: number
+): FilterSegment[] {
   let time = start.getTime();
-  return rows.map((row, i) => {
-    if (i > 0 && row.filter !== rows[i - 1].filter) {
-      time += filterChangeMinutes * 60000;
+  const segments: FilterSegment[] = [];
+  for (let position = 1; position <= mosaic.w * mosaic.h; position++) {
+    if (position > 1) {
+      time += positionOverheadMinutes * 60000;
     }
-    const startTime = new Date(time);
-    time += rowMinutes(row) * 60000;
-    return { filter: row.filter, startTime, endTime: new Date(time) };
-  });
+    rows.forEach((row, i) => {
+      if (i > 0 && row.filter !== rows[i - 1].filter) {
+        time += filterChangeMinutes * 60000;
+      }
+      const startTime = new Date(time);
+      time += rowMinutes(row) * 60000;
+      segments.push({ filter: row.filter, position, startTime, endTime: new Date(time) });
+    });
+  }
+  return segments;
 }
 
 export interface PlannedObject {
@@ -298,6 +356,7 @@ export interface PlannedObject {
   exposure: ExposureSettings;
   activeFilters: string[];
   filterRows: FilterRow[];
+  mosaic: Mosaic;
   isVisible: boolean;
   totalObservationTime: number; // minutes of imaging, excluding setup between targets
   observationScore: number;
