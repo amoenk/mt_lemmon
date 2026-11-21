@@ -23,32 +23,11 @@ import {
 import { SimpleGanttChart } from './SimpleGanttChart';
 import { FilterControls } from './FilterControls';
 import { ObservationTable } from './ObservationTable';
+import { encodeShare, decodeShare } from '../utils/shareCode';
 
 const DEFAULT_OBSERVATION_DATE = '2027-01-09';
 const DEFAULT_FILTER_CHANGE_MINUTES = 1;
 const DEFAULT_POSITION_OVERHEAD_MINUTES = 2;
-const SHARE_VERSION = 2;
-
-// Settings saved before filter rows (share v1, old localStorage key) stored a plain filter list
-// and an imaging-time override. Convert the list to rows at default exposure; drop the override.
-interface CustomObjectSettingsV1 {
-  imagingTime?: number;
-  filters?: string[];
-  priority?: number;
-}
-
-const migrateCustomSettingsV1 = (
-  settings: Record<string, CustomObjectSettingsV1>
-): Record<string, CustomObjectSettings> =>
-  Object.fromEntries(Object.entries(settings).map(([name, old]) => {
-    const type = deepSkyObjects.find(d => d.name === name)?.type ?? 'planet';
-    const exposure = getExposureRecommendations(type);
-    const migrated: CustomObjectSettings = {};
-    if (old.priority) migrated.priority = old.priority;
-    if (old.filters) migrated.filterRows = defaultFilterRows({ ...exposure, filters: old.filters });
-    return [name, migrated];
-  }));
-
 export const ObservationPlanner: React.FC = () => {
   // Check URL params first, then localStorage, then defaults
   const loadSettingWithUrlParam = <T,>(key: string, urlParam: string, defaultValue: T): T => {
@@ -84,24 +63,7 @@ export const ObservationPlanner: React.FC = () => {
     const settings = urlParams.get('s');
     if (settings) {
       try {
-        // Decode from base64
-        const json = decodeURIComponent(atob(settings));
-        const parsed = JSON.parse(json);
-        
-        // Validate version
-        if (parsed.v === 1 || parsed.v === SHARE_VERSION) {
-          return {
-            selectedDate: parsed.d || DEFAULT_OBSERVATION_DATE,
-            startTime: parsed.st || '22:00',
-            endTime: parsed.et || '06:00',
-            minAltitude: parsed.ma || 15,
-            setupTime: parsed.setup || 10,
-            filterChangeTime: parsed.v === 1 ? DEFAULT_FILTER_CHANGE_MINUTES : parsed.fc,
-            positionOverhead: parsed.po ?? DEFAULT_POSITION_OVERHEAD_MINUTES,
-            hiddenObjects: new Set<string>(parsed.h || []),
-            customSettings: parsed.v === 1 ? migrateCustomSettingsV1(parsed.cs || {}) : parsed.cs
-          };
-        }
+        return decodeShare(settings);
       } catch (error) {
         console.error('Failed to parse URL settings:', error);
       }
@@ -112,25 +74,25 @@ export const ObservationPlanner: React.FC = () => {
   const urlSettings = loadSettingsFromUrl();
 
   const [selectedDate, setSelectedDate] = useState<string>(() => 
-    urlSettings?.selectedDate || loadSettingWithUrlParam('observationDate', 'date', DEFAULT_OBSERVATION_DATE)
+    urlSettings?.selectedDate ?? loadSettingWithUrlParam('observationDate', 'date', DEFAULT_OBSERVATION_DATE)
   );
   const [startTime, setStartTime] = useState<string>(() => 
-    urlSettings?.startTime || loadSettingWithUrlParam('startTime', 'start', getDarkWindow(selectedDate).startTime)
+    urlSettings?.startTime ?? loadSettingWithUrlParam('startTime', 'start', getDarkWindow(selectedDate).startTime)
   );
   const [endTime, setEndTime] = useState<string>(() => 
-    urlSettings?.endTime || loadSettingWithUrlParam('endTime', 'end', getDarkWindow(selectedDate).endTime)
+    urlSettings?.endTime ?? loadSettingWithUrlParam('endTime', 'end', getDarkWindow(selectedDate).endTime)
   );
   const [minAltitude, setMinAltitude] = useState<number>(() =>
-    urlSettings?.minAltitude || loadSettingWithUrlParam('minAltitude', 'alt', 15)
+    urlSettings?.minAltitude ?? loadSettingWithUrlParam('minAltitude', 'alt', 15)
   );
   const [setupTime, setSetupTime] = useState<number>(() =>
-    urlSettings?.setupTime || loadSettingWithUrlParam('setupTime', 'setup', 10)
+    urlSettings?.setupTime ?? loadSettingWithUrlParam('setupTime', 'setup', 10)
   );
   const [isNightMode, setIsNightMode] = useState<boolean>(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [disabledObjects, setDisabledObjects] = useState<Set<string>>(() => {
-    if (urlSettings?.hiddenObjects) {
-      return urlSettings.hiddenObjects;
+    if (urlSettings) {
+      return new Set(urlSettings.hiddenObjects);
     }
     const stored = localStorage.getItem('disabledObjects');
     return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
@@ -155,24 +117,16 @@ export const ObservationPlanner: React.FC = () => {
       return urlSettings.customSettings;
     }
     const stored = localStorage.getItem('customObjectSettingsV2');
-    if (stored) {
-      return JSON.parse(stored);
-    }
-    // One-time upgrade of settings saved before filter rows (the old key is removed once V2 is written)
-    const storedV1 = localStorage.getItem('customObjectSettings');
-    return storedV1 ? migrateCustomSettingsV1(JSON.parse(storedV1)) : {};
+    return stored ? JSON.parse(stored) : {};
   });
 
-  // Clear URL params after loading to keep URL clean
+  // Remove the share code from the URL once read, including codes that couldn't be loaded
+  // (e.g. from an older version), so they aren't parsed again on every render
   useEffect(() => {
-    if (urlSettings) {
-      // Settings were loaded from URL, clean it up
-      const url = new URL(window.location.href);
-      url.searchParams.delete('s');
-      window.history.replaceState({}, '', url.toString());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array ensures this runs only once on mount
+    const url = new URL(window.location.href);
+    url.searchParams.delete('s');
+    window.history.replaceState({}, '', url.toString());
+  }, []);
 
   // Save settings to localStorage when they change
   useEffect(() => {
@@ -209,7 +163,6 @@ export const ObservationPlanner: React.FC = () => {
 
   useEffect(() => {
     localStorage.setItem('customObjectSettingsV2', JSON.stringify(customSettings));
-    localStorage.removeItem('customObjectSettings');
   }, [customSettings]);
 
   useEffect(() => {
@@ -609,22 +562,17 @@ export const ObservationPlanner: React.FC = () => {
   };
 
   const handleExport = () => {
-    const settings = {
-      v: SHARE_VERSION,
-      d: selectedDate,
-      st: startTime,
-      et: endTime,
-      ma: minAltitude,
-      setup: setupTime,
-      fc: filterChangeTime,
-      po: positionOverhead,
-      h: Array.from(disabledObjects),
-      cs: customSettings
-    };
-    
-    // Compress to base64
-    const json = JSON.stringify(settings);
-    const compressed = btoa(encodeURIComponent(json));
+    const compressed = encodeShare({
+      selectedDate,
+      startTime,
+      endTime,
+      minAltitude,
+      setupTime,
+      filterChangeTime,
+      positionOverhead,
+      hiddenObjects: Array.from(disabledObjects),
+      customSettings
+    });
     
     // Add prefix to identify it as our settings
     const exportString = `MTLEMMON:${compressed}`;
@@ -654,26 +602,24 @@ export const ObservationPlanner: React.FC = () => {
       
       // Decode
       const compressed = importString.slice(9); // Remove 'MTLEMMON:' prefix
-      const json = decodeURIComponent(atob(compressed));
-      const settings = JSON.parse(json);
+      const settings = decodeShare(compressed);
       
-      // Validate version
-      if (settings.v !== 1 && settings.v !== SHARE_VERSION) {
-        setImportError('Unsupported settings version');
+      if (!settings) {
+        setImportError('This code is from an older version of the planner. Export a new one.');
         setTimeout(() => setImportError(null), 3000);
         return;
       }
       
       // Apply settings
-      setSelectedDate(settings.d || DEFAULT_OBSERVATION_DATE);
-      setStartTime(settings.st || '22:00');
-      setEndTime(settings.et || '06:00');
-      setMinAltitude(settings.ma || 15);
-      setSetupTime(settings.setup || 10); // Default to 10 if not present (backwards compatibility)
-      setFilterChangeTime(settings.v === 1 ? DEFAULT_FILTER_CHANGE_MINUTES : settings.fc);
-      setPositionOverhead(settings.po ?? DEFAULT_POSITION_OVERHEAD_MINUTES);
-      setDisabledObjects(new Set(settings.h || []));
-      setCustomSettings(settings.v === 1 ? migrateCustomSettingsV1(settings.cs || {}) : settings.cs);
+      setSelectedDate(settings.selectedDate);
+      setStartTime(settings.startTime);
+      setEndTime(settings.endTime);
+      setMinAltitude(settings.minAltitude);
+      setSetupTime(settings.setupTime);
+      setFilterChangeTime(settings.filterChangeTime);
+      setPositionOverhead(settings.positionOverhead);
+      setDisabledObjects(new Set(settings.hiddenObjects));
+      setCustomSettings(settings.customSettings);
       
       setImportSuccess(true);
       setTimeout(() => {
