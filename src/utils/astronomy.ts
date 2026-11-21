@@ -225,9 +225,7 @@ export function calculateObjectTimings(
 }
 
 export interface ExposureSettings {
-  exposureTime: number; // seconds
-  binning: string;
-  filters: string[];
+  rows: FilterRow[];
   notes: string;
 }
 
@@ -279,12 +277,7 @@ export const DEFAULT_FRAMES_PER_FILTER = 10;
 export const DOWNLOAD_MINUTES_PER_FRAME = 0.5;
 
 export function defaultFilterRows(exposure: ExposureSettings): FilterRow[] {
-  return exposure.filters.map(filter => ({
-    filter,
-    exposure: exposure.exposureTime,
-    count: DEFAULT_FRAMES_PER_FILTER,
-    binning: 1
-  }));
+  return exposure.rows;
 }
 
 // Number of times the wheel moves while running the rows in order
@@ -444,69 +437,51 @@ export function getMagnificationRecommendation(
   }
 }
 
+// Shorthand for a default plan row
+const row = (filter: string, count: number, exposure: number, binning = 1): FilterRow => ({ filter, count, exposure, binning });
+
 export function getExposureRecommendations(
   objectType: string
 ): ExposureSettings {
-  // Default imaging plan per object type for the 32" f/7 Ritchey-Chrétien.
-  // Exposure lengths are placeholders until SkyCenter advises for their STX-16803 CCD.
-  // Default to Luminance only for minimal imaging time
-  
+  // Default imaging plan per object type for the 32" f/7 Ritchey-Chrétien and SkyCenter's STX-16803 CCD.
+  // 300 s frames (the mount's unguided limit) keep read noise low; we're shooting luminance and Hα only.
   switch(objectType) {
     case 'galaxy':
       return {
-        exposureTime: 60,
-        binning: '1x1',
-        filters: ['Luminance'],
-        notes: 'Quick luminance capture. Add RGB/Ha filters for color.'
+        rows: [row('Luminance', 12, 300)],
+        notes: 'Deep luminance for a sharp monochrome image.'
       };
     
     case 'nebula':
     case 'planetary_nebula':
+    case 'supernova_remnant':
       return {
-        exposureTime: 120,
-        binning: '1x1',
-        filters: ['Luminance'],
-        notes: 'Luminance only. Add Ha/OIII/SII for narrowband detail.'
+        rows: [row('Ha', 12, 300), row('Luminance', 6, 300)],
+        notes: 'Hα for the glowing gas, luminance for stars and dust. Very bright targets (like M42) also need a set of short frames for the core.'
       };
     
     case 'globular_cluster':
       return {
-        exposureTime: 30,
-        binning: '1x1',
-        filters: ['Luminance'],
-        notes: 'Short exposure to prevent core saturation.'
+        rows: [row('Luminance', 20, 60)],
+        notes: 'Shorter frames so the core doesn\'t saturate.'
       };
     
     case 'open_cluster':
       return {
-        exposureTime: 20,
-        binning: '1x1',
-        filters: ['Luminance'],
-        notes: 'Quick capture for star clusters.'
-      };
-    
-    case 'supernova_remnant':
-      return {
-        exposureTime: 180,
-        binning: '1x1 or 2x2',
-        filters: ['Luminance'],
-        notes: 'Luminance baseline. Add Ha/OIII for detail.'
+        rows: [row('Luminance', 10, 60)],
+        notes: 'Short frames for bright stars.'
       };
     
     case 'planet':
       return {
-        exposureTime: 0.01,
-        binning: '1x1',
-        filters: ['Luminance'],
-        notes: 'High frame rate capture. Add filters for detail.'
+        rows: [row('Luminance', 1, 1)],
+        notes: 'High frame rate video capture. Add filters for detail.'
       };
     
     default:
       return {
-        exposureTime: 60,
-        binning: '1x1',
-        filters: ['Luminance'],
-        notes: 'Quick luminance capture.'
+        rows: [row('Luminance', 12, 300)],
+        notes: 'Deep luminance capture.'
       };
   }
 }

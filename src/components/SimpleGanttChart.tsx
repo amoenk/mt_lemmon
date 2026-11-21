@@ -551,7 +551,8 @@ Score: ${block.observationScore?.toFixed(1)}`}
                               title={`${section.label}: ${formatTime(section.startTime)} - ${formatTime(section.endTime)}
 Scheduled: ${formatTime(scheduled.startTime)} - ${formatTime(scheduled.endTime)}
 Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m
-Airmass: ${scheduled.meanAirmass.toFixed(2)} avg (altitude ${scheduled.altitudeRange.min.toFixed(0)}°–${scheduled.altitudeRange.max.toFixed(0)}°)`}
+Airmass: ${scheduled.meanAirmass.toFixed(2)} avg (altitude ${scheduled.altitudeRange.min.toFixed(0)}°–${scheduled.altitudeRange.max.toFixed(0)}°)${scheduled.extraFrames > 0 ? `
+Gap fill: +${scheduled.extraFrames} frames` : ''}`}
                             />
                             </React.Fragment>
                           ));

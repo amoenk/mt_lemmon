@@ -186,6 +186,11 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                                   <span className="text-gray-400">Imaging:</span> {Math.round(scheduled.imagingTime)} min
                                 </div>
                                 <div>
+                                  <span className="text-gray-400">Frames:</span>{' '}
+                                  {scheduled.rows.map(row => `${row.filter} ${row.count}×${row.exposure}s`).join(', ')}
+                                  {scheduled.extraFrames > 0 && <span className="text-green-400"> (+{scheduled.extraFrames} gap fill)</span>}
+                                </div>
+                                <div>
                                   <span className="text-gray-400">Airmass:</span> {scheduled.meanAirmass.toFixed(2)} avg,{' '}
                                   <span className="text-gray-400">Altitude:</span> {scheduled.altitudeRange.min.toFixed(0)}°–{scheduled.altitudeRange.max.toFixed(0)}°
                                 </div>
@@ -459,6 +464,11 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                                     <div>
                                       <span className="text-gray-400">Setup:</span> {scheduled.setupTime} min,{' '}
                                       <span className="text-gray-400">Imaging:</span> {Math.round(scheduled.imagingTime)} min
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Frames:</span>{' '}
+                                      {scheduled.rows.map(row => `${row.filter} ${row.count}×${row.exposure}s`).join(', ')}
+                                      {scheduled.extraFrames > 0 && <span className="text-green-400"> (+{scheduled.extraFrames} gap fill)</span>}
                                     </div>
                                     <div>
                                       <span className="text-gray-400">Airmass:</span> {scheduled.meanAirmass.toFixed(2)} avg,{' '}
