@@ -5,8 +5,10 @@ import {
   decToDecimal,
   filterSegments,
   getPlanetPosition,
+  targetMinutes,
   raToDecimal,
   MT_LEMMON_LOCATION,
+  type FilterRow,
   type FilterSegment,
   type PlannedObject
 } from './astronomy';
@@ -21,7 +23,9 @@ export interface ScheduledObservation {
   startTime: Date;
   endTime: Date;
   setupTime: number; // minutes before this target (0 for the night's first)
-  imagingTime: number; // minutes
+  imagingTime: number; // minutes, including gap-fill frames
+  rows: FilterRow[]; // the plan's rows with any gap-fill frames added
+  extraFrames: number; // frames added to fill gaps (per mosaic position)
   segments: FilterSegment[];
   meanAirmass: number;
   altitudeRange: { min: number; max: number }; // degrees over the block
@@ -75,8 +79,22 @@ export function scheduleNight(
     || b.observationScore - a.observationScore
   );
   
-  const booked: Array<{ start: number; end: number; obj: PlannedObject; meanAirmass: number; altitudeRange: { min: number; max: number } }> = [];
+  const booked: Array<{
+    start: number;
+    end: number;
+    obj: PlannedObject;
+    rows: FilterRow[];
+    altitudes: number[];
+    usable: boolean[];
+  }> = [];
   const unscheduledReasons: Record<string, string> = {};
+  
+  // Grid points covering [start, end]: from the last point at or before start to the first at or after end
+  const spanIndexes = (start: number, end: number): number[] => {
+    const first = Math.floor((start - windowStart) / gridMs);
+    const last = grid.findIndex(t => t >= end);
+    return Array.from({ length: last - first + 1 }, (_, k) => first + k);
+  };
   
   for (const obj of order) {
     const altitudes = grid.map(t => altitudeAt(obj, new Date(t)));
@@ -100,14 +118,7 @@ export function scheduleNight(
     }
     
     if (best) {
-      const blockAltitudes = altitudes.slice(best.first, best.last + 1);
-      booked.push({
-        start: best.start,
-        end: best.start + durationMs,
-        obj,
-        meanAirmass: best.meanAirmass,
-        altitudeRange: { min: Math.min(...blockAltitudes), max: Math.max(...blockAltitudes) }
-      });
+      booked.push({ start: best.start, end: best.start + durationMs, obj, rows: obj.filterRows, altitudes, usable });
       continue;
     }
     
@@ -125,21 +136,62 @@ export function scheduleNight(
       : `No free slot: higher-priority targets fill the time it's up (needs ${needed} min)`;
   }
   
+  // Fill gaps: repeatedly add the one extra frame, across all targets, whose added time has the lowest
+  // airmass, at the start or end of its block. Frames go to the plan's rows in proportion to their counts,
+  // and each row grows to at most twice its planned count. Planets (video capture) aren't extended.
+  for (;;) {
+    let bestExtension: { block: typeof booked[number]; rows: FilterRow[]; start: number; end: number; cost: number } | null = null;
+    for (const block of booked) {
+      if (block.obj.type === 'planet') continue;
+      const plan = block.obj.filterRows;
+      // Row that's furthest behind its share of extra frames
+      const candidates = block.rows
+        .map((row, i) => ({ i, share: (row.count - plan[i].count + 1) / plan[i].count }))
+        .filter(({ i }) => block.rows[i].count < plan[i].count * 2)
+        .sort((a, b) => a.share - b.share);
+      if (candidates.length === 0) continue;
+      const rows = block.rows.map((row, i) => (i === candidates[0].i ? { ...row, count: row.count + 1 } : row));
+      const addedMs = targetMinutes(rows, block.obj.mosaic, options.filterChangeTime, options.positionOverhead) * 60000
+        - (block.end - block.start);
+      const others = booked.filter(b => b !== block);
+      for (const [start, end, edge] of [
+        [block.start - addedMs, block.end, block.start - addedMs],
+        [block.start, block.end + addedMs, block.end + addedMs]
+      ]) {
+        if (start < windowStart || end > windowEnd) continue;
+        if (!others.every(b => start >= b.end + setupMs || end + setupMs <= b.start)) continue;
+        if (!spanIndexes(start, end).every(i => block.usable[i])) continue;
+        const cost = airmass(block.altitudes[Math.round((edge - windowStart) / gridMs)]);
+        if (!bestExtension || cost < bestExtension.cost) {
+          bestExtension = { block, rows, start, end, cost };
+        }
+      }
+    }
+    if (!bestExtension) break;
+    Object.assign(bestExtension.block, { rows: bestExtension.rows, start: bestExtension.start, end: bestExtension.end });
+  }
+  
   const scheduled = booked
     .sort((a, b) => a.start - b.start)
-    .map((b, i) => ({
-      objectId: b.obj.id,
-      startTime: new Date(b.start),
-      endTime: new Date(b.end),
-      setupTime: i === 0 ? 0 : options.setupTime,
-      imagingTime: b.obj.totalObservationTime,
-      // Planets are video captures with no per-frame plan to break down
-      segments: b.obj.type === 'planet'
-        ? []
-        : filterSegments(b.obj.filterRows, b.obj.mosaic, new Date(b.start), options.filterChangeTime, options.positionOverhead),
-      meanAirmass: b.meanAirmass,
-      altitudeRange: b.altitudeRange
-    }));
+    .map((b, i) => {
+      const indexes = spanIndexes(b.start, b.end);
+      const blockAltitudes = indexes.map(k => b.altitudes[k]);
+      return {
+        objectId: b.obj.id,
+        startTime: new Date(b.start),
+        endTime: new Date(b.end),
+        setupTime: i === 0 ? 0 : options.setupTime,
+        imagingTime: (b.end - b.start) / 60000,
+        rows: b.rows,
+        extraFrames: b.rows.reduce((sum, row, k) => sum + row.count - b.obj.filterRows[k].count, 0),
+        // Planets are video captures with no per-frame plan to break down
+        segments: b.obj.type === 'planet'
+          ? []
+          : filterSegments(b.rows, b.obj.mosaic, new Date(b.start), options.filterChangeTime, options.positionOverhead),
+        meanAirmass: blockAltitudes.reduce((sum, alt) => sum + airmass(alt), 0) / blockAltitudes.length,
+        altitudeRange: { min: Math.min(...blockAltitudes), max: Math.max(...blockAltitudes) }
+      };
+    });
   
   return { scheduled, unscheduledReasons };
 }
