@@ -2,51 +2,83 @@ import React from 'react';
 import { mosaicCoverage, suggestedMosaic, type Mosaic, type PlannedObject } from '../utils/astronomy';
 import { PositiveNumberInput } from './PositiveNumberInput';
 
+// Mosaic grid details for a target, or null for targets without a catalog size (e.g. planets)
+const mosaicInfo = (obj: PlannedObject) => {
+  if (!obj.size || obj.type === 'planet') return null;
+  const coverage = mosaicCoverage(obj.mosaic);
+  return {
+    size: obj.size,
+    coverage,
+    suggestion: suggestedMosaic(obj.size),
+    coversTarget: coverage.width >= obj.size.width && coverage.height >= obj.size.height
+  };
+};
+
+const formatArcmin = (area: { width: number; height: number }) =>
+  `${area.width.toFixed(0)}'×${area.height.toFixed(0)}'`;
+
+// Read-only: target size, current grid and what it covers, and a warning if it's too small
+export const MosaicSummary: React.FC<{ obj: PlannedObject }> = ({ obj }) => {
+  const info = mosaicInfo(obj);
+  if (!info) {
+    return <span>{obj.size ? `${obj.size.width}'×${obj.size.height}'` : 'N/A'}</span>;
+  }
+  return (
+    <div className="space-y-0.5">
+      <div>{info.size.width}'×{info.size.height}'</div>
+      <div className="text-xs text-gray-400 whitespace-nowrap">
+        {obj.mosaic.w}×{obj.mosaic.h} = {formatArcmin(info.coverage)}
+      </div>
+      {!info.coversTarget && (
+        <div className="text-xs text-amber-400 whitespace-nowrap">
+          ⚠ needs {info.suggestion.w}×{info.suggestion.h}
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface MosaicControlProps {
   obj: PlannedObject;
   onChange: (mosaic: Mosaic) => void;
 }
 
-// Target size plus a W × H mosaic grid centered on the target, with a hint when the grid
-// doesn't cover the whole target
+// Editable W × H mosaic grid centered on the target, with a button to apply the suggested grid
 export const MosaicControl: React.FC<MosaicControlProps> = ({ obj, onChange }) => {
-  if (!obj.size || obj.type === 'planet') {
-    return <span>{obj.size ? `${obj.size.width}'×${obj.size.height}'` : 'N/A'}</span>;
-  }
+  const info = mosaicInfo(obj);
+  if (!info) return null;
   
-  const coverage = mosaicCoverage(obj.mosaic);
-  const suggestion = suggestedMosaic(obj.size);
-  const coversTarget = coverage.width >= obj.size.width && coverage.height >= obj.size.height;
-  const inputClass = 'w-10 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-xs text-center';
+  const inputClass = 'w-12 px-1.5 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-center';
   
   return (
-    <div className="space-y-1">
-      <div>{obj.size.width}'×{obj.size.height}'</div>
-      <div className="flex items-center gap-1 text-xs text-gray-400">
+    <div>
+      <label className="block text-sm text-gray-400 mb-1">
+        Mosaic (W × H positions, centered on target)
+      </label>
+      <div className="flex flex-wrap items-center gap-1.5 text-sm">
         <PositiveNumberInput
           value={obj.mosaic.w}
           onCommit={(w) => onChange({ ...obj.mosaic, w })}
           className={inputClass}
           label="Mosaic columns"
         />
-        <span>×</span>
+        <span className="text-gray-500">×</span>
         <PositiveNumberInput
           value={obj.mosaic.h}
           onCommit={(h) => onChange({ ...obj.mosaic, h })}
           className={inputClass}
           label="Mosaic rows"
         />
-        <span className="whitespace-nowrap">
-          = {coverage.width.toFixed(0)}'×{coverage.height.toFixed(0)}'
+        <span className="text-gray-400">
+          covers {formatArcmin(info.coverage)} · target {info.size.width}'×{info.size.height}'
         </span>
       </div>
-      {!coversTarget && (
+      {!info.coversTarget && (
         <button
-          onClick={() => onChange(suggestion)}
-          className="text-xs text-amber-400 hover:text-amber-300 whitespace-nowrap"
-          title={`The grid covers less than the target's ${obj.size.width}'×${obj.size.height}'. Click to use ${suggestion.w}×${suggestion.h}.`}
+          onClick={() => onChange(info.suggestion)}
+          className="mt-1 text-sm text-amber-400 hover:text-amber-300"
         >
-          ⚠ needs {suggestion.w}×{suggestion.h}
+          ⚠ Grid is smaller than the target · use {info.suggestion.w}×{info.suggestion.h}
         </button>
       )}
     </div>
