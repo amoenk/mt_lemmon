@@ -14,16 +14,15 @@ import {
   getDarkWindow,
   defaultFilterRows,
   targetMinutes,
-  filterSegments,
   SINGLE_POSITION,
   type PlannedObject,
-  type CustomObjectSettings,
-  type FilterSegment
+  type CustomObjectSettings
 } from '../utils/astronomy';
 import { SimpleGanttChart } from './SimpleGanttChart';
 import { FilterControls } from './FilterControls';
 import { ObservationTable } from './ObservationTable';
 import { encodeShare, decodeShare } from '../utils/shareCode';
+import { scheduleNight } from '../utils/scheduler';
 
 const DEFAULT_OBSERVATION_DATE = '2027-01-09';
 const DEFAULT_FILTER_CHANGE_MINUTES = 1;
@@ -436,103 +435,20 @@ export const ObservationPlanner: React.FC = () => {
     });
   }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime, positionOverhead]);
 
-  const visibleObjects = allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id));
+  const visibleObjects = useMemo(
+    () => allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id)),
+    [allObjects, disabledObjects]
+  );
 
-  // Schedule observations based on priority and availability
-  const scheduledObservations = useMemo(() => {
-    const scheduled: Array<{
-      objectId: string;
-      startTime: Date;
-      endTime: Date;
-      setupTime: number; // minutes
-      imagingTime: number; // minutes
-      segments: FilterSegment[];
-    }> = [];
-    
-    const windowEnd = observationEndDate.getTime();
-    const stepMs = 5 * 60 * 1000;
-    const setupMs = setupTime * 60 * 1000;
-
-    const altitudeAt = (obj: PlannedObject, time: Date): number | null => {
-      const ra = obj.type === 'planet' 
-        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, time)?.ra : 0)
-        : raToDecimal(deepSkyObjects.find(d => d.name === obj.name)?.ra || {hours: 0, minutes: 0, seconds: 0});
-      const dec = obj.type === 'planet'
-        ? (obj.timings.transitTime ? getPlanetPosition(obj.name, time)?.dec : 0)
-        : decToDecimal(deepSkyObjects.find(d => d.name === obj.name)?.dec || {degrees: 0, minutes: 0, seconds: 0});
-      if (!ra || !dec) return null;
-      return calculateAltitude(ra, dec, time, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
-    };
-
-    const imagingMinutes = (obj: PlannedObject) => obj.totalObservationTime;
-
-    // Fits if it's above the minimum altitude at both ends of the imaging run and finishes inside the window
-    const fitsAt = (obj: PlannedObject, start: Date): boolean => {
-      const end = new Date(start.getTime() + imagingMinutes(obj) * 60 * 1000);
-      if (end.getTime() > windowEnd) return false;
-      const startAltitude = altitudeAt(obj, start);
-      const endAltitude = altitudeAt(obj, end);
-      return startAltitude !== null && endAltitude !== null
-        && startAltitude >= minAltitude && endAltitude >= minAltitude;
-    };
-
-    // Highest priority first, then highest score
-    const candidates = [...visibleObjects].sort((a, b) =>
-      b.priority - a.priority || b.observationScore - a.observationScore
-    );
-    const unscheduled = new Set(candidates.map(obj => obj.id));
-
-    // Walk forward through the night: at each slot take the best object that fits,
-    // otherwise wait a few minutes and try again
-    let currentTime = observationDate.getTime();
-    let isFirstObject = true;
-    while (unscheduled.size > 0) {
-      const slotStart = new Date(isFirstObject ? currentTime : currentTime + setupMs);
-      if (slotStart.getTime() >= windowEnd) break;
-
-      const obj = candidates.find(o => unscheduled.has(o.id) && fitsAt(o, slotStart));
-      if (!obj) {
-        currentTime += stepMs;
-        continue;
-      }
-
-      const imagingTimeOnly = imagingMinutes(obj);
-      const endTime = new Date(slotStart.getTime() + imagingTimeOnly * 60 * 1000);
-      scheduled.push({
-        objectId: obj.id,
-        startTime: slotStart,
-        endTime,
-        setupTime: isFirstObject ? 0 : setupTime, // No setup for first object, it's at start of session
-        imagingTime: imagingTimeOnly,
-        // Planets are video captures with no per-frame plan to break down
-        segments: obj.type === 'planet' ? [] : filterSegments(obj.filterRows, obj.mosaic, slotStart, filterChangeTime, positionOverhead)
-      });
-      unscheduled.delete(obj.id);
-      currentTime = endTime.getTime();
-      isFirstObject = false;
-    }
-    
-    return scheduled;
-  }, [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime, positionOverhead]);
-
-  // Why each visible, enabled target missed the schedule
-  const unscheduledReasons = useMemo(() => {
-    const windowStart = observationDate.getTime();
-    const windowEnd = observationEndDate.getTime();
-    const reasons: Record<string, string> = {};
-    for (const obj of visibleObjects) {
-      if (scheduledObservations.some(s => s.objectId === obj.id)) continue;
-      const { riseTime, setTime, isCircumpolar } = obj.timings;
-      const availableMinutes = isCircumpolar || !riseTime || !setTime
-        ? (windowEnd - windowStart) / 60000
-        : (Math.min(setTime.getTime(), windowEnd) - Math.max(riseTime.getTime(), windowStart)) / 60000;
-      const needed = Math.round(obj.totalObservationTime);
-      reasons[obj.id] = needed > availableMinutes
-        ? `Too long to fit: needs ${needed} min, but it's above ${minAltitude}° for only ${Math.max(0, Math.round(availableMinutes))} min tonight`
-        : `No free slot: other targets fill the time it's up (needs ${needed} min)`;
-    }
-    return reasons;
-  }, [visibleObjects, scheduledObservations, observationDate, observationEndDate, minAltitude]);
+  // Each target in its lowest-airmass free slot, highest priority first
+  const { scheduled: scheduledObservations, unscheduledReasons } = useMemo(() => scheduleNight(visibleObjects, {
+    windowStart: observationDate,
+    windowEnd: observationEndDate,
+    minAltitude,
+    setupTime,
+    filterChangeTime,
+    positionOverhead
+  }), [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime, positionOverhead]);
 
   const toggleExpanded = (id: string) => {
     const newExpanded = new Set(expandedRows);
