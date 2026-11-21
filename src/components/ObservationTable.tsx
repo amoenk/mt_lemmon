@@ -187,7 +187,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                     </div>
                     
                     <div>
-                      <h4 className="font-bold text-sm mb-2">Visual & Imaging Recommendations</h4>
+                      <h4 className="font-bold text-sm mb-2">Visual & Imaging Recommendations (32" f/7)</h4>
                       <div className="space-y-2">
                         {(() => {
                           const magRec = getMagnificationRecommendation(obj.size, obj.type);
@@ -214,9 +214,6 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                         <div>
                           <div className="font-semibold text-gray-300 mb-1">Imaging:</div>
                           <div className="space-y-1 text-sm">
-                            <div>
-                              <span className="text-gray-400">Gain:</span> {exposure.gain}
-                            </div>
                             <div>
                               <span className="text-gray-400">Filter Plan:</span>{' '}
                               {obj.type === 'planet'
@@ -450,7 +447,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                         </div>
                         
                         <div>
-                          <h4 className="font-bold text-sm mb-2">Visual & Imaging Recommendations (32" f/5)</h4>
+                          <h4 className="font-bold text-sm mb-2">Visual & Imaging Recommendations (32" f/7)</h4>
                           <div className="space-y-2">
                             {(() => {
                               const magRec = getMagnificationRecommendation(obj.size, obj.type);
@@ -477,9 +474,6 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                             <div>
                               <div className="font-semibold text-gray-300 mb-1">Imaging:</div>
                               <div className="space-y-1 text-sm">
-                                <div>
-                                  <span className="text-gray-400">Gain:</span> {exposure.gain}
-                                </div>
                                 <div>
                                   <span className="text-gray-400">Filter Plan:</span>{' '}
                                   {obj.type === 'planet'

@@ -219,7 +219,6 @@ export function calculateObjectTimings(
 
 export interface ExposureSettings {
   exposureTime: number; // seconds
-  gain: string;
   binning: string;
   filters: string[];
   notes: string;
@@ -309,8 +308,7 @@ export function getMagnificationRecommendation(
   size: { width: number; height: number } | undefined,
   objectType: string
 ): { magnification: string; eyepiece: string; fov: string; notes: string } {
-  // 32" telescope with f/5 = 4064mm focal length
-  // const telescopeFocalLength = 4064; // mm (kept for reference)
+  // 32" telescope at f/7 = 5695mm focal length
   
   if (!size) {
     return {
@@ -383,15 +381,14 @@ export function getMagnificationRecommendation(
 export function getExposureRecommendations(
   objectType: string
 ): ExposureSettings {
-  // Recommendations for 32" f/5 reflector telescope
-  // Assuming modern CMOS camera with cooling
+  // Default imaging plan per object type for the 32" f/7 Ritchey-Chrétien.
+  // Exposure lengths are placeholders until SkyCenter advises for their STX-16803 CCD.
   // Default to Luminance only for minimal imaging time
   
   switch(objectType) {
     case 'galaxy':
       return {
         exposureTime: 60,
-        gain: 'Unity (100)',
         binning: '1x1',
         filters: ['Luminance'],
         notes: 'Quick luminance capture. Add RGB/Ha filters for color.'
@@ -401,7 +398,6 @@ export function getExposureRecommendations(
     case 'planetary_nebula':
       return {
         exposureTime: 120,
-        gain: 'Unity (100)',
         binning: '1x1',
         filters: ['Luminance'],
         notes: 'Luminance only. Add Ha/OIII/SII for narrowband detail.'
@@ -410,7 +406,6 @@ export function getExposureRecommendations(
     case 'globular_cluster':
       return {
         exposureTime: 30,
-        gain: 'Unity (100)',
         binning: '1x1',
         filters: ['Luminance'],
         notes: 'Short exposure to prevent core saturation.'
@@ -419,7 +414,6 @@ export function getExposureRecommendations(
     case 'open_cluster':
       return {
         exposureTime: 20,
-        gain: 'Unity (100)',
         binning: '1x1',
         filters: ['Luminance'],
         notes: 'Quick capture for star clusters.'
@@ -428,7 +422,6 @@ export function getExposureRecommendations(
     case 'supernova_remnant':
       return {
         exposureTime: 180,
-        gain: 'Unity (100)',
         binning: '1x1 or 2x2',
         filters: ['Luminance'],
         notes: 'Luminance baseline. Add Ha/OIII for detail.'
@@ -437,7 +430,6 @@ export function getExposureRecommendations(
     case 'planet':
       return {
         exposureTime: 0.01,
-        gain: 'High (200-400)',
         binning: '1x1',
         filters: ['Luminance'],
         notes: 'High frame rate capture. Add filters for detail.'
@@ -446,7 +438,6 @@ export function getExposureRecommendations(
     default:
       return {
         exposureTime: 60,
-        gain: 'Unity (100)',
         binning: '1x1',
         filters: ['Luminance'],
         notes: 'Quick luminance capture.'
