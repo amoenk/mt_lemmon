@@ -12,13 +12,40 @@ import {
   getExposureRecommendations,
   getSunTimes,
   getDarkWindow,
-  type PlannedObject
+  defaultFilterRows,
+  sequenceMinutes,
+  filterSegments,
+  type PlannedObject,
+  type CustomObjectSettings,
+  type FilterSegment
 } from '../utils/astronomy';
 import { SimpleGanttChart } from './SimpleGanttChart';
 import { FilterControls } from './FilterControls';
 import { ObservationTable } from './ObservationTable';
 
 const DEFAULT_OBSERVATION_DATE = '2027-01-09';
+const DEFAULT_FILTER_CHANGE_MINUTES = 1;
+const SHARE_VERSION = 2;
+
+// Settings saved before filter rows (share v1, old localStorage key) stored a plain filter list
+// and an imaging-time override. Convert the list to rows at default exposure; drop the override.
+interface CustomObjectSettingsV1 {
+  imagingTime?: number;
+  filters?: string[];
+  priority?: number;
+}
+
+const migrateCustomSettingsV1 = (
+  settings: Record<string, CustomObjectSettingsV1>
+): Record<string, CustomObjectSettings> =>
+  Object.fromEntries(Object.entries(settings).map(([name, old]) => {
+    const type = deepSkyObjects.find(d => d.name === name)?.type ?? 'planet';
+    const exposure = getExposureRecommendations(type);
+    const migrated: CustomObjectSettings = {};
+    if (old.priority) migrated.priority = old.priority;
+    if (old.filters) migrated.filterRows = defaultFilterRows({ ...exposure, filters: old.filters });
+    return [name, migrated];
+  }));
 
 export const ObservationPlanner: React.FC = () => {
   // Check URL params first, then localStorage, then defaults
@@ -60,15 +87,16 @@ export const ObservationPlanner: React.FC = () => {
         const parsed = JSON.parse(json);
         
         // Validate version
-        if (parsed.v === 1) {
+        if (parsed.v === 1 || parsed.v === SHARE_VERSION) {
           return {
             selectedDate: parsed.d || DEFAULT_OBSERVATION_DATE,
             startTime: parsed.st || '22:00',
             endTime: parsed.et || '06:00',
             minAltitude: parsed.ma || 15,
             setupTime: parsed.setup || 10,
+            filterChangeTime: parsed.v === 1 ? DEFAULT_FILTER_CHANGE_MINUTES : parsed.fc,
             hiddenObjects: new Set<string>(parsed.h || []),
-            customSettings: parsed.cs || {}
+            customSettings: parsed.v === 1 ? migrateCustomSettingsV1(parsed.cs || {}) : parsed.cs
           };
         }
       } catch (error) {
@@ -111,18 +139,21 @@ export const ObservationPlanner: React.FC = () => {
   const [shareableLink, setShareableLink] = useState('');
   const [copiedButton, setCopiedButton] = useState<'code' | 'link' | 'list' | null>(null);
 
-  interface CustomObjectSettings {
-    imagingTime?: number; // minutes
-    filters?: string[];
-    priority?: number; // 1-10
-  }
-  
+  const [filterChangeTime, setFilterChangeTime] = useState<number>(() =>
+    urlSettings?.filterChangeTime ?? loadSettingWithUrlParam('filterChangeTime', 'fc', DEFAULT_FILTER_CHANGE_MINUTES)
+  );
+
   const [customSettings, setCustomSettings] = useState<Record<string, CustomObjectSettings>>(() => {
     if (urlSettings?.customSettings) {
       return urlSettings.customSettings;
     }
-    const stored = localStorage.getItem('customObjectSettings');
-    return stored ? JSON.parse(stored) : {};
+    const stored = localStorage.getItem('customObjectSettingsV2');
+    if (stored) {
+      return JSON.parse(stored);
+    }
+    // One-time upgrade of settings saved before filter rows (the old key is removed once V2 is written)
+    const storedV1 = localStorage.getItem('customObjectSettings');
+    return storedV1 ? migrateCustomSettingsV1(JSON.parse(storedV1)) : {};
   });
 
   // Clear URL params after loading to keep URL clean
@@ -162,7 +193,12 @@ export const ObservationPlanner: React.FC = () => {
   }, [disabledObjects]);
 
   useEffect(() => {
-    localStorage.setItem('customObjectSettings', JSON.stringify(customSettings));
+    localStorage.setItem('filterChangeTime', JSON.stringify(filterChangeTime));
+  }, [filterChangeTime]);
+
+  useEffect(() => {
+    localStorage.setItem('customObjectSettingsV2', JSON.stringify(customSettings));
+    localStorage.removeItem('customObjectSettings');
   }, [customSettings]);
 
   useEffect(() => {
@@ -268,18 +304,9 @@ export const ObservationPlanner: React.FC = () => {
       
       // Use custom settings if available
       const objectCustomSettings = customSettings[obj.name];
-      const activeFilters = objectCustomSettings?.filters || exposure.filters;
-      const customImagingTime = objectCustomSettings?.imagingTime;
-      
-      const setupTime = 10; // Standard setup time for all objects
-      const exposuresPerFilter = 10;
-      const downloadTime = 0.5;
-      
-      // Use custom imaging time if set, otherwise calculate from exposure recommendations
-      const totalObservationTime = customImagingTime || 
-        ((exposure.exposureTime * exposuresPerFilter * activeFilters.length) / 60 
-         + (downloadTime * exposuresPerFilter * activeFilters.length)
-         + setupTime);
+      const filterRows = objectCustomSettings?.filterRows ?? defaultFilterRows(exposure);
+      const activeFilters = [...new Set(filterRows.map(row => row.filter))];
+      const totalObservationTime = sequenceMinutes(filterRows, filterChangeTime);
       
       // Check if object is visible during our observation window
       let isVisible = false;
@@ -338,7 +365,7 @@ export const ObservationPlanner: React.FC = () => {
         maxAltitudeDuringWindow,
         exposure,
         activeFilters,
-        customImagingTime,
+        filterRows,
         isVisible,
         totalObservationTime,
         observationScore,
@@ -372,15 +399,12 @@ export const ObservationPlanner: React.FC = () => {
         
         // Use custom settings if available
         const objectCustomSettings = customSettings[planet.name];
-        const activeFilters = objectCustomSettings?.filters || exposure.filters;
-        const customImagingTime = objectCustomSettings?.imagingTime;
+        const filterRows = objectCustomSettings?.filterRows ?? defaultFilterRows(exposure);
+        const activeFilters = [...new Set(filterRows.map(row => row.filter))];
         
-        const setupTime = 10; // Consistent setup time
+        // Planets are captured as video: a fixed capture time per filter
         const captureTime = 10;
-        
-        // Use custom imaging time if set, otherwise calculate from active filters
-        const totalObservationTime = customImagingTime || 
-          ((captureTime * activeFilters.length) + setupTime);
+        const totalObservationTime = captureTime * filterRows.length;
         
         const isVisible = timings.transitAltitude >= minAltitude;
         
@@ -419,7 +443,7 @@ export const ObservationPlanner: React.FC = () => {
           maxAltitudeDuringWindow,
           exposure,
           activeFilters,
-          customImagingTime,
+          filterRows,
           isVisible,
           totalObservationTime,
           observationScore,
@@ -443,7 +467,7 @@ export const ObservationPlanner: React.FC = () => {
       
       return aTransitTime - bTransitTime;
     });
-  }, [observationDate, observationEndDate, minAltitude, customSettings]);
+  }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime]);
 
   const visibleObjects = allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id));
 
@@ -455,6 +479,7 @@ export const ObservationPlanner: React.FC = () => {
       endTime: Date;
       setupTime: number; // minutes
       imagingTime: number; // minutes
+      segments: FilterSegment[];
     }> = [];
     
     const windowEnd = observationEndDate.getTime();
@@ -472,8 +497,7 @@ export const ObservationPlanner: React.FC = () => {
       return calculateAltitude(ra, dec, time, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
     };
 
-    // Imaging time only; setup is scheduled separately
-    const imagingMinutes = (obj: PlannedObject) => Math.round((obj.totalObservationTime || 70) - 10);
+    const imagingMinutes = (obj: PlannedObject) => obj.totalObservationTime;
 
     // Fits if it's above the minimum altitude at both ends of the imaging run and finishes inside the window
     const fitsAt = (obj: PlannedObject, start: Date): boolean => {
@@ -512,7 +536,9 @@ export const ObservationPlanner: React.FC = () => {
         startTime: slotStart,
         endTime,
         setupTime: isFirstObject ? 0 : setupTime, // No setup for first object, it's at start of session
-        imagingTime: imagingTimeOnly
+        imagingTime: imagingTimeOnly,
+        // Planets are video captures with no per-frame plan to break down
+        segments: obj.type === 'planet' ? [] : filterSegments(obj.filterRows, slotStart, filterChangeTime)
       });
       unscheduled.delete(obj.id);
       currentTime = endTime.getTime();
@@ -520,7 +546,7 @@ export const ObservationPlanner: React.FC = () => {
     }
     
     return scheduled;
-  }, [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime]);
+  }, [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime]);
 
   const toggleExpanded = (id: string) => {
     const newExpanded = new Set(expandedRows);
@@ -551,12 +577,13 @@ export const ObservationPlanner: React.FC = () => {
 
   const handleExport = () => {
     const settings = {
-      v: 1, // version
+      v: SHARE_VERSION,
       d: selectedDate,
       st: startTime,
       et: endTime,
       ma: minAltitude,
       setup: setupTime,
+      fc: filterChangeTime,
       h: Array.from(disabledObjects),
       cs: customSettings
     };
@@ -597,7 +624,7 @@ export const ObservationPlanner: React.FC = () => {
       const settings = JSON.parse(json);
       
       // Validate version
-      if (settings.v !== 1) {
+      if (settings.v !== 1 && settings.v !== SHARE_VERSION) {
         setImportError('Unsupported settings version');
         setTimeout(() => setImportError(null), 3000);
         return;
@@ -609,8 +636,9 @@ export const ObservationPlanner: React.FC = () => {
       setEndTime(settings.et || '06:00');
       setMinAltitude(settings.ma || 15);
       setSetupTime(settings.setup || 10); // Default to 10 if not present (backwards compatibility)
+      setFilterChangeTime(settings.v === 1 ? DEFAULT_FILTER_CHANGE_MINUTES : settings.fc);
       setDisabledObjects(new Set(settings.h || []));
-      setCustomSettings(settings.cs || {});
+      setCustomSettings(settings.v === 1 ? migrateCustomSettingsV1(settings.cs || {}) : settings.cs);
       
       setImportSuccess(true);
       setTimeout(() => {
@@ -633,13 +661,15 @@ export const ObservationPlanner: React.FC = () => {
     localStorage.removeItem('minAltitude');
     localStorage.removeItem('setupTime');
     localStorage.removeItem('disabledObjects');
-    localStorage.removeItem('customObjectSettings');
+    localStorage.removeItem('filterChangeTime');
+    localStorage.removeItem('customObjectSettingsV2');
     
     // Reset to defaults
     setSelectedDate(DEFAULT_OBSERVATION_DATE);
     syncToDarkWindow(DEFAULT_OBSERVATION_DATE);
     setMinAltitude(15);
     setSetupTime(10);
+    setFilterChangeTime(DEFAULT_FILTER_CHANGE_MINUTES);
     setDisabledObjects(new Set());
     setCustomSettings({});
   };
@@ -727,11 +757,13 @@ export const ObservationPlanner: React.FC = () => {
           endTime={endTime}
           minAltitude={minAltitude}
           setupTime={setupTime}
+          filterChangeTime={filterChangeTime}
           onDateChange={changeDate}
           onStartTimeChange={setStartTime}
           onEndTimeChange={setEndTime}
           onMinAltitudeChange={setMinAltitude}
           onSetupTimeChange={setSetupTime}
+          onFilterChangeTimeChange={setFilterChangeTime}
           />
         </div>
 
