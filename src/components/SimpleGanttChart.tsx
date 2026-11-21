@@ -94,6 +94,15 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
     ? 'text-slate-900'
     : 'text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]';
   
+  // The night's date at the site, e.g. "Sat, Jan 9, 2027"
+  const nightDate = startTime.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'America/Phoenix'
+  });
+  
   // Night-wide airmass, weighted by imaging time
   const totalImaging = scheduledObservations.reduce((sum, s) => sum + s.imagingTime, 0);
   const nightAirmass = totalImaging > 0
@@ -205,7 +214,10 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   return (
     <div className="bg-gray-900 p-0 sm:p-6 rounded-lg">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-2 sm:mb-4 gap-1 sm:gap-0 px-3 sm:px-0 pt-3 sm:pt-0">
-        <h3 className="text-lg sm:text-xl font-bold">Observation Timeline</h3>
+        <h3 className="text-lg sm:text-xl font-bold">
+          Observation Timeline
+          <span className="ml-2 font-normal text-gray-400">· {nightDate}</span>
+        </h3>
         <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-400">
           <span>{formatTime(startTime)} - {formatTime(endTime)} MST</span>
           {nightAirmass !== null && (
@@ -490,7 +502,7 @@ ${moonPhase.phase}, ${moonPhase.illumination.toFixed(0)}% illuminated`}
 Rise: ${formatTime(block.blockStart)}
 Transit: ${block.transit ? formatTime(block.transit) : 'N/A'}
 Set: ${formatTime(block.blockEnd)}
-Photo time: ${Math.round(block.totalObservationTime)} min
+Photo time: ${Math.round(scheduled?.imagingTime ?? block.totalObservationTime)} min
 Score: ${block.observationScore?.toFixed(1)}`}
                         >
                           <div className="px-2 py-1 h-full flex flex-col justify-center overflow-visible">
@@ -498,7 +510,7 @@ Score: ${block.observationScore?.toFixed(1)}`}
                               {block.commonName ? `${block.name} ${block.commonName}` : block.name}
                             </div>
                             <div className="text-xs text-gray-200 opacity-90 whitespace-nowrap">
-                              {Math.round(block.totalObservationTime)}m • Score: {block.observationScore?.toFixed(0)}
+                              {Math.round(scheduled?.imagingTime ?? block.totalObservationTime)}m • Score: {block.observationScore?.toFixed(0)}
                             </div>
                           </div>
                         </div>
