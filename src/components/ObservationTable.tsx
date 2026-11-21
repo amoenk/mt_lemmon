@@ -1,7 +1,7 @@
 import React from 'react';
 import { getExposureRecommendations, getMagnificationRecommendation, type PlannedObject, type CustomObjectSettings } from '../utils/astronomy';
 import { FilterRowsEditor } from './FilterRowsEditor';
-import { MosaicControl } from './MosaicControl';
+import { MosaicControl, MosaicSummary } from './MosaicControl';
 
 interface ObservationTableProps {
   observations: PlannedObject[];
@@ -134,13 +134,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                 <div className="col-span-2">
                   <span className="text-gray-500">Size / Mosaic:</span>
                   <div className="font-medium">
-                    <MosaicControl
-                      obj={obj}
-                      onChange={(mosaic) => onUpdateSettings?.(obj.id, {
-                        ...customSettings[obj.id],
-                        mosaic
-                      })}
-                    />
+                    <MosaicSummary obj={obj} />
                   </div>
                 </div>
               </div>
@@ -296,6 +290,14 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                           </div>
                         </div>
                         
+                        <MosaicControl
+                          obj={obj}
+                          onChange={(mosaic) => onUpdateSettings?.(obj.id, {
+                            ...customSettings[obj.id],
+                            mosaic
+                          })}
+                        />
+                        
                         <FilterRowsEditor
                           obj={obj}
                           onChange={(filterRows) => onUpdateSettings?.(obj.id, {
@@ -401,13 +403,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                     {obj.maxAltitudeDuringWindow ? obj.maxAltitudeDuringWindow.toFixed(0) : obj.timings.transitAltitude.toFixed(0)}°
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    <MosaicControl
-                      obj={obj}
-                      onChange={(mosaic) => onUpdateSettings?.(obj.id, {
-                      ...customSettings[obj.id],
-                      mosaic
-                    })}
-                    />
+                    <MosaicSummary obj={obj} />
                   </td>
                   <td className="px-4 py-3 text-sm">
                     {obj.magnitude ? obj.magnitude.toFixed(1) : 'N/A'}
@@ -570,6 +566,14 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                                 )}
                               </div>
                             </div>
+                            
+                            <MosaicControl
+                              obj={obj}
+                              onChange={(mosaic) => onUpdateSettings?.(obj.id, {
+                                ...customSettings[obj.id],
+                                mosaic
+                              })}
+                            />
                             
                             <FilterRowsEditor
                               obj={obj}
