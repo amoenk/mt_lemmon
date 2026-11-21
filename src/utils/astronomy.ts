@@ -537,3 +537,44 @@ export function getPlanetPosition(planet: string, date: Date): { ra: number; dec
     azimuth: hor.azimuth
   };
 }
+export interface SunTimes {
+  sunset: Date;
+  astroDusk: Date; // Sun reaches -18°: astronomical dark begins
+  astroDawn: Date; // Sun rises past -18°: astronomical dark ends
+  sunrise: Date;
+}
+
+// Sun events for the night beginning on `date` (YYYY-MM-DD, Mt. Lemmon local time, UTC-7)
+export function getSunTimes(date: string): SunTimes {
+  const observer = new Astronomy.Observer(
+    MT_LEMMON_LOCATION.latitude,
+    MT_LEMMON_LOCATION.longitude,
+    MT_LEMMON_LOCATION.elevation
+  );
+  const noon = new Date(`${date}T12:00:00-07:00`);
+  return {
+    sunset: Astronomy.SearchRiseSet(Astronomy.Body.Sun, observer, -1, noon, 1)!.date,
+    astroDusk: Astronomy.SearchAltitude(Astronomy.Body.Sun, observer, -1, noon, 1, -18)!.date,
+    astroDawn: Astronomy.SearchAltitude(Astronomy.Body.Sun, observer, +1, noon, 1, -18)!.date,
+    sunrise: Astronomy.SearchRiseSet(Astronomy.Body.Sun, observer, +1, noon, 1)!.date
+  };
+}
+
+const toPhoenixHHMM = (date: Date): string =>
+  date.toLocaleTimeString('en-US', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Phoenix'
+  });
+
+// Observation window covering astronomical darkness, as HH:MM strings.
+// Start rounds up and end rounds down so the window stays inside full dark.
+export function getDarkWindow(date: string): { startTime: string; endTime: string } {
+  const { astroDusk, astroDawn } = getSunTimes(date);
+  const minute = 60000;
+  return {
+    startTime: toPhoenixHHMM(new Date(Math.ceil(astroDusk.getTime() / minute) * minute)),
+    endTime: toPhoenixHHMM(new Date(Math.floor(astroDawn.getTime() / minute) * minute))
+  };
+}

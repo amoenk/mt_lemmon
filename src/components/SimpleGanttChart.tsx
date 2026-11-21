@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { getMoonUpPeriods, type MoonPhaseInfo, type PlannedObject } from '../utils/astronomy';
+import { getMoonUpPeriods, type MoonPhaseInfo, type PlannedObject, type SunTimes } from '../utils/astronomy';
 
 interface SimpleGanttChartProps {
   observations: PlannedObject[];
   moonPhase: MoonPhaseInfo;
   startTime: Date;
   endTime: Date;
+  sunTimes: SunTimes;
+  isSyncedToDark: boolean;
+  onSyncToDark: () => void;
   expandedRows: Set<string>;
   scheduledObservations?: Array<{
     objectId: string;
@@ -21,6 +24,9 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   moonPhase,
   startTime,
   endTime,
+  sunTimes,
+  isSyncedToDark,
+  onSyncToDark,
   scheduledObservations = []
 }) => {
   // Responsive hook to detect mobile
@@ -39,8 +45,16 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
   // Extend the view - much less on mobile for better visibility
   const extensionHours = isMobile ? 0.25 : 1.5; // 15 minutes on mobile, 1.5 hours on desktop
   
-  const extendedStartTime = new Date(startTime.getTime() - extensionHours * 60 * 60 * 1000);
-  const extendedEndTime = new Date(endTime.getTime() + extensionHours * 60 * 60 * 1000);
+  // Always include sunset and sunrise (plus padding) so the sun markers are visible
+  const sunPaddingMs = (isMobile ? 10 : 30) * 60 * 1000;
+  const extendedStartTime = new Date(Math.min(
+    startTime.getTime() - extensionHours * 60 * 60 * 1000,
+    sunTimes.sunset.getTime() - sunPaddingMs
+  ));
+  const extendedEndTime = new Date(Math.max(
+    endTime.getTime() + extensionHours * 60 * 60 * 1000,
+    sunTimes.sunrise.getTime() + sunPaddingMs
+  ));
   
   // Calculate total duration in minutes (for extended view)
   const totalMinutes = (extendedEndTime.getTime() - extendedStartTime.getTime()) / 60000;
@@ -190,8 +204,23 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
     <div className="bg-gray-900 p-0 sm:p-6 rounded-lg">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-2 sm:mb-4 gap-1 sm:gap-0 px-3 sm:px-0 pt-3 sm:pt-0">
         <h3 className="text-lg sm:text-xl font-bold">Observation Timeline</h3>
-        <div className="text-xs sm:text-sm text-gray-400">
-          {formatTime(startTime)} - {formatTime(endTime)} MST
+        <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-400">
+          <span>{formatTime(startTime)} - {formatTime(endTime)} MST</span>
+          {!isSyncedToDark && <button
+            type="button"
+            onClick={onSyncToDark}
+            className="px-2 py-0.5 rounded border border-indigo-500/60 text-indigo-300 hover:bg-indigo-500/20 text-xs"
+            title={`Set the window to astronomical dark: ${formatTime(sunTimes.astroDusk)} - ${formatTime(sunTimes.astroDawn)}`}
+          >
+            🌌 Sync to dark
+          </button>}
+        </div>
+        <div className="sm:hidden text-xs">
+          <span className="text-amber-300">☀↓ {formatTime(sunTimes.sunset)}</span>
+          <span className="text-gray-500"> · </span>
+          <span className="text-indigo-300">Dark {formatTime(sunTimes.astroDusk)}–{formatTime(sunTimes.astroDawn)}</span>
+          <span className="text-gray-500"> · </span>
+          <span className="text-amber-300">☀↑ {formatTime(sunTimes.sunrise)}</span>
         </div>
       </div>
       
@@ -212,25 +241,17 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
           <div className="bg-gray-800 rounded-none sm:rounded-lg p-0 sm:p-4 overflow-hidden">
             {/* Timeline header with hour markers */}
             <div className="relative h-6 sm:h-8 border-b border-gray-700 mb-2 sm:mb-4 px-2 sm:px-4 pt-2 sm:pt-0">
-              {/* Mobile: Show only start and end times */}
-              <div className="sm:hidden">
-                <div className="absolute text-xs text-gray-400 left-0">
-                  {formatTime(extendedStartTime)}
-                </div>
-                <div className="absolute text-xs text-gray-400 right-0">
-                  {formatTime(extendedEndTime)}
-                </div>
-              </div>
-              
-              {/* Desktop: Show all hour markers */}
+              {/* Hour markers: every hour on desktop, every 3 hours on mobile */}
               {hours.map((hour, i) => {
                 const position = getPosition(hour);
                 if (position < 0 || position > 100) return null;
+                // Labels are centered on the hour, so skip ones that would hang off the edge on mobile
+                const showOnMobile = Number(formatTime(hour).slice(0, 2)) % 3 === 0 && position > 6 && position < 94;
                 
                 return (
                   <div
                     key={i}
-                    className="absolute text-xs text-gray-400 hidden sm:block"
+                    className={`absolute text-xs text-gray-400 ${showOnMobile ? '' : 'hidden sm:block'}`}
                     style={{ 
                       left: `${position}%`,
                       transform: 'translateX(-50%)'
@@ -244,6 +265,32 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
             
             {/* Timeline rows */}
             <div className="relative sm:-mx-4 sm:px-4 pb-2 sm:pb-0" style={{ minHeight: `${(Math.max(rows.length, 1) + 1) * 50 + 20}px` }}>
+              {/* Daylight and twilight shading: amber at the sun events, fading to clear at astronomical dark */}
+              <div
+                className="absolute top-0 bottom-0 pointer-events-none bg-amber-400/15"
+                style={{ left: '0', width: `${getPosition(sunTimes.sunset)}%` }}
+              />
+              <div
+                className="absolute top-0 bottom-0 pointer-events-none"
+                style={{
+                  left: `${getPosition(sunTimes.sunset)}%`,
+                  width: `${getPosition(sunTimes.astroDusk) - getPosition(sunTimes.sunset)}%`,
+                  background: 'linear-gradient(to right, rgba(251,146,60,0.35), rgba(99,102,241,0.25) 50%, rgba(99,102,241,0))'
+                }}
+              />
+              <div
+                className="absolute top-0 bottom-0 pointer-events-none"
+                style={{
+                  left: `${getPosition(sunTimes.astroDawn)}%`,
+                  width: `${getPosition(sunTimes.sunrise) - getPosition(sunTimes.astroDawn)}%`,
+                  background: 'linear-gradient(to left, rgba(251,146,60,0.35), rgba(99,102,241,0.25) 50%, rgba(99,102,241,0))'
+                }}
+              />
+              <div
+                className="absolute top-0 bottom-0 pointer-events-none bg-amber-400/15"
+                style={{ left: `${getPosition(sunTimes.sunrise)}%`, right: '0' }}
+              />
+              
               {/* Dimmed regions outside observation window */}
               <div
                 className="absolute top-0 bottom-0 bg-gray-900/50 pointer-events-none z-20"
@@ -269,6 +316,29 @@ export const SimpleGanttChart: React.FC<SimpleGanttChartProps> = ({
                 className="absolute top-0 bottom-0 border-r-2 border-blue-500/50 z-20"
                 style={{ left: `${observationEndPercent}%` }}
               />
+              
+              {/* Sunset/sunrise and astronomical dark markers */}
+              {[
+                { time: sunTimes.sunset, label: `☀↓ ${formatTime(sunTimes.sunset)}`, title: 'Sunset', lineClass: 'border-l-2 border-amber-400/80', labelClass: 'text-amber-300', labelSide: 'right' },
+                { time: sunTimes.astroDusk, label: `Dark ${formatTime(sunTimes.astroDusk)}`, title: 'Astronomical dark begins (Sun 18° below horizon)', lineClass: 'border-l-2 border-dashed border-indigo-400/70', labelClass: 'text-indigo-300', labelSide: 'right' },
+                { time: sunTimes.astroDawn, label: `Dark ${formatTime(sunTimes.astroDawn)}`, title: 'Astronomical dark ends (Sun 18° below horizon)', lineClass: 'border-l-2 border-dashed border-indigo-400/70', labelClass: 'text-indigo-300', labelSide: 'left' },
+                { time: sunTimes.sunrise, label: `☀↑ ${formatTime(sunTimes.sunrise)}`, title: 'Sunrise', lineClass: 'border-l-2 border-amber-400/80', labelClass: 'text-amber-300', labelSide: 'left' }
+              ].map(marker => (
+                <div
+                  key={marker.title}
+                  className="absolute top-0 bottom-0 z-20"
+                  style={{ left: `${getPosition(marker.time)}%` }}
+                  title={`${marker.title}: ${formatTime(marker.time)} MST`}
+                >
+                  <div className={`absolute top-0 bottom-0 ${marker.lineClass}`} />
+                  <div
+                    className={`absolute bottom-0 px-1 text-xs font-semibold whitespace-nowrap hidden sm:block ${marker.labelClass}`}
+                    style={{ transform: marker.labelSide === 'left' ? 'translateX(-100%)' : 'translateX(2px)' }}
+                  >
+                    {marker.label}
+                  </div>
+                </div>
+              ))}
               
               {/* Hour grid lines */}
               {hours.map((hour, i) => {
@@ -489,6 +559,20 @@ Setup: ${scheduled.setupTime}m, Imaging: ${Math.round(scheduled.imagingTime)}m`}
               <div className="w-3 h-3 sm:w-4 sm:h-4 bg-slate-200 rounded"></div>
               <span className="hidden sm:inline">Moon up (brighter = fuller)</span>
               <span className="sm:hidden">Moon</span>
+            </div>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 rounded" style={{ background: 'linear-gradient(to right, rgba(251,146,60,0.6), rgba(99,102,241,0.4))' }}></div>
+              <span>Twilight</span>
+            </div>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="h-3 sm:h-4 border-l-2 border-amber-400/80"></div>
+              <span className="hidden sm:inline">Sunset / Sunrise</span>
+              <span className="sm:hidden">Sun</span>
+            </div>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="h-3 sm:h-4 border-l-2 border-dashed border-indigo-400/70"></div>
+              <span className="hidden sm:inline">Astronomical dark</span>
+              <span className="sm:hidden">Dark</span>
             </div>
             <div className="flex items-center gap-1 sm:gap-2">
               <div className="w-0.5 h-3 sm:h-4 bg-white opacity-50"></div>
