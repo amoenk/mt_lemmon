@@ -143,6 +143,33 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
               {isExpanded && (
                 <div className="mt-3 pt-3 border-t border-gray-700">
                   <div className="space-y-4">
+                    {scheduled && (
+                      <div className="p-2 text-sm bg-blue-900/20 border border-blue-600 rounded">
+                        <div className="font-bold text-blue-400">Scheduled Observation:</div>
+                        <div>
+                          <span className="text-gray-400">Start:</span>{' '}
+                          <span className="text-blue-300">{formatTime(scheduled.startTime)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">End:</span>{' '}
+                          <span className="text-blue-300">{formatTime(scheduled.endTime)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Setup:</span> {scheduled.setupTime} min,{' '}
+                          <span className="text-gray-400">Imaging:</span> {Math.round(scheduled.imagingTime)} min
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Frames:</span>{' '}
+                          {scheduled.rows.map(row => `${row.filter} ${row.count}×${row.exposure}s`).join(', ')}
+                          {scheduled.extraFrames > 0 && <span className="text-green-400"> (+{scheduled.extraFrames} gap fill)</span>}
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Airmass:</span> {scheduled.meanAirmass.toFixed(2)} avg,{' '}
+                          <span className="text-gray-400">Altitude:</span> {scheduled.altitudeRange.min.toFixed(0)}°–{scheduled.altitudeRange.max.toFixed(0)}°
+                        </div>
+                      </div>
+                    )}
+                    
                     <div>
                       <h4 className="font-bold text-sm mb-2">Observation Details</h4>
                       <div className="space-y-1 text-sm">
@@ -168,38 +195,6 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                           <span className="text-gray-400">Score:</span> {obj.observationScore.toFixed(1)}
                           <span className="text-gray-500"> (a final tiebreaker when scheduling)</span>
                         </div>
-                        {(() => {
-                          const scheduled = scheduledObservations.find(s => s.objectId === obj.id);
-                          if (scheduled) {
-                            return (
-                              <div className="mt-2 p-2 bg-blue-900/20 border border-blue-600 rounded">
-                                <div className="font-bold text-blue-400">Scheduled Observation:</div>
-                                <div>
-                                  <span className="text-gray-400">Start:</span>{' '}
-                                  <span className="text-blue-300">{formatTime(scheduled.startTime)}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-400">End:</span>{' '}
-                                  <span className="text-blue-300">{formatTime(scheduled.endTime)}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-400">Setup:</span> {scheduled.setupTime} min,{' '}
-                                  <span className="text-gray-400">Imaging:</span> {Math.round(scheduled.imagingTime)} min
-                                </div>
-                                <div>
-                                  <span className="text-gray-400">Frames:</span>{' '}
-                                  {scheduled.rows.map(row => `${row.filter} ${row.count}×${row.exposure}s`).join(', ')}
-                                  {scheduled.extraFrames > 0 && <span className="text-green-400"> (+{scheduled.extraFrames} gap fill)</span>}
-                                </div>
-                                <div>
-                                  <span className="text-gray-400">Airmass:</span> {scheduled.meanAirmass.toFixed(2)} avg,{' '}
-                                  <span className="text-gray-400">Altitude:</span> {scheduled.altitudeRange.min.toFixed(0)}°–{scheduled.altitudeRange.max.toFixed(0)}°
-                                </div>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
                       </div>
                     </div>
                     
