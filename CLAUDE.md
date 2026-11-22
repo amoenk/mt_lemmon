@@ -32,6 +32,7 @@ npm run preview   # Preview production build locally
 
 ### Key Constants
 - **Mt. Lemmon Location**: Latitude 32.4433°N, Longitude 110.7892°W, Elevation 2791m
+- **Default observation date**: the next moonless night from today (at most 30 minutes of moonlight during astronomical dark)
 - **Default observation window**: astronomical dark for the selected date (Sun 18° below the horizon)
 - **Minimum altitude threshold**: 15° above horizon (configurable)
 

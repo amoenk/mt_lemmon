@@ -10,6 +10,7 @@ import {
   getExposureRecommendations,
   getSunTimes,
   getDarkWindow,
+  nextMoonlessNight,
   defaultFilterRows,
   targetMinutes,
   SINGLE_POSITION,
@@ -25,7 +26,6 @@ import { ObservationTable } from './ObservationTable';
 import { encodeShare, decodeShare } from '../utils/shareCode';
 import { scheduleNight } from '../utils/scheduler';
 
-const DEFAULT_OBSERVATION_DATE = '2027-01-09';
 const DEFAULT_FILTER_CHANGE_MINUTES = 1;
 const DEFAULT_POSITION_OVERHEAD_MINUTES = 2;
 const DESKTOP_QUERY = '(min-width: 1024px)';
@@ -77,8 +77,11 @@ export const ObservationPlanner: React.FC = () => {
 
   const urlSettings = loadSettingsFromUrl();
 
+  // Evergreen default: the next moonless night from today
+  const [defaultDate] = useState(() => nextMoonlessNight(new Date()));
+
   const [selectedDate, setSelectedDate] = useState<string>(() => 
-    urlSettings?.selectedDate ?? loadSettingWithUrlParam('observationDate', 'date', DEFAULT_OBSERVATION_DATE)
+    urlSettings?.selectedDate ?? loadSettingWithUrlParam('observationDate', 'date', defaultDate)
   );
   const [startTime, setStartTime] = useState<string>(() => 
     urlSettings?.startTime ?? loadSettingWithUrlParam('startTime', 'start', getDarkWindow(selectedDate).startTime)
@@ -94,13 +97,19 @@ export const ObservationPlanner: React.FC = () => {
   );
   const [isNightMode, setIsNightMode] = useState<boolean>(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [disabledObjects, setDisabledObjects] = useState<Set<string>>(() => {
+  // Which targets are turned off. null means automatic: enable the highest-priority targets that fit the
+  // night (recomputed as the night changes) until the user edits a checkbox, imports, or opens a link.
+  const [manualDisabledObjects, setManualDisabledObjects] = useState<Set<string> | null>(() => {
     if (urlSettings) {
       return new Set(urlSettings.hiddenObjects);
     }
     const stored = localStorage.getItem('disabledObjects');
-    return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+    return stored ? new Set<string>(JSON.parse(stored)) : null;
   });
+  // The night a manual selection was made for, to flag when the date has since changed
+  const [targetsChosenFor, setTargetsChosenFor] = useState<string | null>(() =>
+    urlSettings ? urlSettings.selectedDate : JSON.parse(localStorage.getItem('targetsChosenFor') ?? 'null')
+  );
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importValue, setImportValue] = useState('');
@@ -158,8 +167,16 @@ export const ObservationPlanner: React.FC = () => {
   }, [setupTime]);
 
   useEffect(() => {
-    localStorage.setItem('disabledObjects', JSON.stringify(Array.from(disabledObjects)));
-  }, [disabledObjects]);
+    if (manualDisabledObjects) {
+      localStorage.setItem('disabledObjects', JSON.stringify(Array.from(manualDisabledObjects)));
+    } else {
+      localStorage.removeItem('disabledObjects');
+    }
+  }, [manualDisabledObjects]);
+
+  useEffect(() => {
+    localStorage.setItem('targetsChosenFor', JSON.stringify(targetsChosenFor));
+  }, [targetsChosenFor]);
 
   useEffect(() => {
     localStorage.setItem('filterChangeTime', JSON.stringify(filterChangeTime));
@@ -370,20 +387,33 @@ export const ObservationPlanner: React.FC = () => {
     });
   }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime, positionOverhead, mosaicOverlap]);
 
-  const visibleObjects = useMemo(
-    () => allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id)),
-    [allObjects, disabledObjects]
-  );
-
-  // Each target in its lowest-airmass free slot, highest priority first
-  const { scheduled: scheduledObservations, unscheduledReasons } = useMemo(() => scheduleNight(visibleObjects, {
+  const scheduleOptions = useMemo(() => ({
     windowStart: observationDate,
     windowEnd: observationEndDate,
     minAltitude,
     setupTime,
     filterChangeTime,
     positionOverhead
-  }), [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime, positionOverhead]);
+  }), [observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime, positionOverhead]);
+
+  // Automatic pick: schedule every visible target by priority and turn off the ones that don't fit
+  const disabledObjects = useMemo(() => {
+    if (manualDisabledObjects) return manualDisabledObjects;
+    const { scheduled } = scheduleNight(allObjects.filter(obj => obj.isVisible), scheduleOptions);
+    const fits = new Set(scheduled.map(s => s.objectId));
+    return new Set(allObjects.filter(obj => !fits.has(obj.id)).map(obj => obj.id));
+  }, [manualDisabledObjects, allObjects, scheduleOptions]);
+
+  const visibleObjects = useMemo(
+    () => allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id)),
+    [allObjects, disabledObjects]
+  );
+
+  // Each target in its lowest-airmass free slot, highest priority first
+  const { scheduled: scheduledObservations, unscheduledReasons } = useMemo(
+    () => scheduleNight(visibleObjects, scheduleOptions),
+    [visibleObjects, scheduleOptions]
+  );
 
   const toggleExpanded = (id: string) => {
     const newExpanded = new Set(expandedRows);
@@ -395,6 +425,7 @@ export const ObservationPlanner: React.FC = () => {
     setExpandedRows(newExpanded);
   };
 
+  // Editing a checkbox turns the current selection (automatic or not) into the user's own
   const toggleObjectEnabled = (id: string) => {
     const newDisabled = new Set(disabledObjects);
     if (newDisabled.has(id)) {
@@ -402,7 +433,14 @@ export const ObservationPlanner: React.FC = () => {
     } else {
       newDisabled.add(id);
     }
-    setDisabledObjects(newDisabled);
+    setManualDisabledObjects(newDisabled);
+    setTargetsChosenFor(selectedDate);
+  };
+
+  // Back to automatic: the highest-priority targets that fit the current night
+  const pickBestTargets = () => {
+    setManualDisabledObjects(null);
+    setTargetsChosenFor(null);
   };
 
   // Layout: settings dialog and the targets panel (right column on desktop, full-screen overlay below 1024px)
@@ -514,7 +552,8 @@ export const ObservationPlanner: React.FC = () => {
       setFilterChangeTime(settings.filterChangeTime);
       setPositionOverhead(settings.positionOverhead);
       setMosaicOverlap(settings.mosaicOverlap);
-      setDisabledObjects(new Set(settings.hiddenObjects));
+      setManualDisabledObjects(new Set(settings.hiddenObjects));
+      setTargetsChosenFor(settings.selectedDate);
       setCustomSettings(settings.customSettings);
       
       setImportSuccess(true);
@@ -538,20 +577,21 @@ export const ObservationPlanner: React.FC = () => {
     localStorage.removeItem('minAltitude');
     localStorage.removeItem('setupTime');
     localStorage.removeItem('disabledObjects');
+    localStorage.removeItem('targetsChosenFor');
     localStorage.removeItem('filterChangeTime');
     localStorage.removeItem('positionOverhead');
     localStorage.removeItem('mosaicOverlap');
     localStorage.removeItem('customObjectSettingsV2');
     
     // Reset to defaults
-    setSelectedDate(DEFAULT_OBSERVATION_DATE);
-    syncToDarkWindow(DEFAULT_OBSERVATION_DATE);
+    setSelectedDate(defaultDate);
+    syncToDarkWindow(defaultDate);
     setMinAltitude(15);
     setSetupTime(10);
     setFilterChangeTime(DEFAULT_FILTER_CHANGE_MINUTES);
     setPositionOverhead(DEFAULT_POSITION_OVERHEAD_MINUTES);
     setMosaicOverlap(DEFAULT_MOSAIC_OVERLAP_PERCENT);
-    setDisabledObjects(new Set());
+    pickBestTargets();
     setCustomSettings({});
   };
 
@@ -756,6 +796,9 @@ export const ObservationPlanner: React.FC = () => {
           isSyncedToDark={isSyncedToDark}
           onSyncToDark={() => syncToDarkWindow(selectedDate)}
           onReset={resetSettings}
+          targetsAreAutomatic={manualDisabledObjects === null}
+          targetsChosenFor={targetsChosenFor}
+          onPickBestTargets={pickBestTargets}
           onClose={() => setShowSettings(false)}
         />
       )}

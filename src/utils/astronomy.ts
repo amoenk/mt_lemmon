@@ -625,3 +625,31 @@ export function getDarkWindow(date: string): { startTime: string; endTime: strin
     endTime: toPhoenixHHMM(new Date(Math.floor(astroDawn.getTime() / minute) * minute))
   };
 }
+
+// A night counts as moonless when the Moon is up for at most this long during astronomical dark
+export const MAX_MOONLIGHT_MINUTES = 30;
+
+// YYYY-MM-DD of a moment at Mt. Lemmon (MST, UTC-7)
+const localDateString = (date: Date): string =>
+  date.toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
+
+// Minutes the Moon is above the horizon during the night's astronomical dark
+export function moonlightMinutes(date: string): number {
+  const { astroDusk, astroDawn } = getSunTimes(date);
+  return getMoonUpPeriods(astroDusk, astroDawn).reduce((sum, period) =>
+    sum + Math.max(0, Math.min(period.setTime.getTime(), astroDawn.getTime()) - Math.max(period.riseTime.getTime(), astroDusk.getTime())) / 60000,
+  0);
+}
+
+// The first moonless night whose dark hasn't ended yet, starting from the night in progress at `now`
+// (after midnight, that's the night that began the previous evening)
+export function nextMoonlessNight(now: Date): string {
+  const night = new Date(now.getTime() - 24 * 3600000);
+  for (;;) {
+    const date = localDateString(night);
+    if (getSunTimes(date).astroDawn > now && moonlightMinutes(date) <= MAX_MOONLIGHT_MINUTES) {
+      return date;
+    }
+    night.setTime(night.getTime() + 24 * 3600000);
+  }
+}
