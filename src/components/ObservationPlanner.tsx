@@ -13,6 +13,9 @@ import {
   defaultFilterRows,
   targetMinutes,
   SINGLE_POSITION,
+  DEFAULT_MOSAIC_OVERLAP_PERCENT,
+  suggestedMosaic,
+  mosaicCoverage,
   type PlannedObject,
   type CustomObjectSettings
 } from '../utils/astronomy';
@@ -113,6 +116,10 @@ export const ObservationPlanner: React.FC = () => {
     urlSettings?.positionOverhead ?? loadSettingWithUrlParam('positionOverhead', 'po', DEFAULT_POSITION_OVERHEAD_MINUTES)
   );
 
+  const [mosaicOverlap, setMosaicOverlap] = useState<number>(() =>
+    urlSettings?.mosaicOverlap ?? loadSettingWithUrlParam('mosaicOverlap', 'overlap', DEFAULT_MOSAIC_OVERLAP_PERCENT)
+  );
+
   const [customSettings, setCustomSettings] = useState<Record<string, CustomObjectSettings>>(() => {
     if (urlSettings?.customSettings) {
       return urlSettings.customSettings;
@@ -161,6 +168,10 @@ export const ObservationPlanner: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('positionOverhead', JSON.stringify(positionOverhead));
   }, [positionOverhead]);
+
+  useEffect(() => {
+    localStorage.setItem('mosaicOverlap', JSON.stringify(mosaicOverlap));
+  }, [mosaicOverlap]);
 
   useEffect(() => {
     localStorage.setItem('customObjectSettingsV2', JSON.stringify(customSettings));
@@ -271,7 +282,10 @@ export const ObservationPlanner: React.FC = () => {
       const objectCustomSettings = customSettings[obj.name];
       const filterRows = objectCustomSettings?.filterRows ?? defaultFilterRows(exposure);
       const activeFilters = [...new Set(filterRows.map(row => row.filter))];
-      const mosaic = objectCustomSettings?.mosaic ?? SINGLE_POSITION;
+      // Default grid: the smallest that covers the catalog size at the current overlap
+      const overlap = mosaicOverlap / 100;
+      const suggestedGrid = obj.size ? suggestedMosaic(obj.size, overlap) : SINGLE_POSITION;
+      const mosaic = objectCustomSettings?.mosaic ?? suggestedGrid;
       const totalObservationTime = targetMinutes(filterRows, mosaic, filterChangeTime, positionOverhead);
       
       // Check if object is visible during our observation window
@@ -333,6 +347,8 @@ export const ObservationPlanner: React.FC = () => {
         activeFilters,
         filterRows,
         mosaic,
+        suggestedMosaic: suggestedGrid,
+        mosaicCoverage: mosaicCoverage(mosaic, overlap),
         isVisible,
         totalObservationTime,
         observationScore,
@@ -352,7 +368,7 @@ export const ObservationPlanner: React.FC = () => {
       
       return aTransitTime - bTransitTime;
     });
-  }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime, positionOverhead]);
+  }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime, positionOverhead, mosaicOverlap]);
 
   const visibleObjects = useMemo(
     () => allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id)),
@@ -448,6 +464,7 @@ export const ObservationPlanner: React.FC = () => {
       setupTime,
       filterChangeTime,
       positionOverhead,
+      mosaicOverlap,
       hiddenObjects: Array.from(disabledObjects),
       customSettings
     });
@@ -496,6 +513,7 @@ export const ObservationPlanner: React.FC = () => {
       setSetupTime(settings.setupTime);
       setFilterChangeTime(settings.filterChangeTime);
       setPositionOverhead(settings.positionOverhead);
+      setMosaicOverlap(settings.mosaicOverlap);
       setDisabledObjects(new Set(settings.hiddenObjects));
       setCustomSettings(settings.customSettings);
       
@@ -522,6 +540,7 @@ export const ObservationPlanner: React.FC = () => {
     localStorage.removeItem('disabledObjects');
     localStorage.removeItem('filterChangeTime');
     localStorage.removeItem('positionOverhead');
+    localStorage.removeItem('mosaicOverlap');
     localStorage.removeItem('customObjectSettingsV2');
     
     // Reset to defaults
@@ -531,6 +550,7 @@ export const ObservationPlanner: React.FC = () => {
     setSetupTime(10);
     setFilterChangeTime(DEFAULT_FILTER_CHANGE_MINUTES);
     setPositionOverhead(DEFAULT_POSITION_OVERHEAD_MINUTES);
+    setMosaicOverlap(DEFAULT_MOSAIC_OVERLAP_PERCENT);
     setDisabledObjects(new Set());
     setCustomSettings({});
   };
@@ -724,6 +744,7 @@ export const ObservationPlanner: React.FC = () => {
           setupTime={setupTime}
           filterChangeTime={filterChangeTime}
           positionOverhead={positionOverhead}
+          mosaicOverlap={mosaicOverlap}
           onDateChange={changeDate}
           onStartTimeChange={setStartTime}
           onEndTimeChange={setEndTime}
@@ -731,6 +752,7 @@ export const ObservationPlanner: React.FC = () => {
           onSetupTimeChange={setSetupTime}
           onFilterChangeTimeChange={setFilterChangeTime}
           onPositionOverheadChange={setPositionOverhead}
+          onMosaicOverlapChange={setMosaicOverlap}
           isSyncedToDark={isSyncedToDark}
           onSyncToDark={() => syncToDarkWindow(selectedDate)}
           onReset={resetSettings}

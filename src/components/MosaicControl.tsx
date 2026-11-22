@@ -1,15 +1,15 @@
 import React from 'react';
-import { mosaicCoverage, suggestedMosaic, type Mosaic, type PlannedObject } from '../utils/astronomy';
+import type { Mosaic, PlannedObject } from '../utils/astronomy';
 import { PositiveNumberInput } from './PositiveNumberInput';
 
 // Mosaic grid details for a target, or null for targets without a catalog size
 const mosaicInfo = (obj: PlannedObject) => {
   if (!obj.size) return null;
-  const coverage = mosaicCoverage(obj.mosaic);
+  const coverage = obj.mosaicCoverage;
   return {
     size: obj.size,
     coverage,
-    suggestion: suggestedMosaic(obj.size),
+    suggestion: obj.suggestedMosaic,
     coversTarget: coverage.width >= obj.size.width && coverage.height >= obj.size.height
   };
 };

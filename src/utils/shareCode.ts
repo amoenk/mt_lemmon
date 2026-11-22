@@ -9,11 +9,12 @@ export interface ShareSettings {
   setupTime: number;
   filterChangeTime: number;
   positionOverhead: number;
+  mosaicOverlap: number; // percent
   hiddenObjects: string[];
   customSettings: Record<string, CustomObjectSettings>;
 }
 
-const SHARE_VERSION = 3;
+const SHARE_VERSION = 4;
 
 const FILTER_CODES: Record<string, string> = {
   Luminance: 'L', Red: 'R', Green: 'G', Blue: 'B', Ha: 'Ha', OIII: 'O3', SII: 'S2', IR850: 'IR', CH4: 'CH4'
@@ -63,6 +64,7 @@ export function encodeShare(settings: ShareSettings): string {
     u: settings.setupTime,
     f: settings.filterChangeTime,
     o: settings.positionOverhead,
+    p: settings.mosaicOverlap,
     h: settings.hiddenObjects.join(','),
     c: Object.fromEntries(
       Object.entries(settings.customSettings)
@@ -85,6 +87,7 @@ export function decodeShare(code: string): ShareSettings | null {
     setupTime: parsed.u,
     filterChangeTime: parsed.f,
     positionOverhead: parsed.o,
+    mosaicOverlap: parsed.p,
     hiddenObjects: parsed.h === '' ? [] : parsed.h.split(','),
     customSettings: Object.fromEntries(
       Object.entries(parsed.c as Record<string, string>).map(([name, encoded]) => [name, decodeTarget(encoded)])

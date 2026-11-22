@@ -255,21 +255,21 @@ const TELESCOPE_FOCAL_LENGTH_MM = 5695;
 const SENSOR_SIZE_MM = 36.864;
 export const FIELD_OF_VIEW_ARCMIN =
   2 * Math.atan(SENSOR_SIZE_MM / 2 / TELESCOPE_FOCAL_LENGTH_MM) * (180 / Math.PI) * 60;
-export const MOSAIC_OVERLAP = 0.1;
+export const DEFAULT_MOSAIC_OVERLAP_PERCENT = 10;
 export const SINGLE_POSITION: Mosaic = { w: 1, h: 1 };
 
-// Sky covered by `positions` frames in a line, each overlapping the next by MOSAIC_OVERLAP
-const coverageArcmin = (positions: number): number =>
-  FIELD_OF_VIEW_ARCMIN * (positions - MOSAIC_OVERLAP * (positions - 1));
+// Sky covered by `positions` frames in a line, each overlapping the next by `overlap` (a fraction of the field)
+const coverageArcmin = (positions: number, overlap: number): number =>
+  FIELD_OF_VIEW_ARCMIN * (positions - overlap * (positions - 1));
 
-export function mosaicCoverage(mosaic: Mosaic): { width: number; height: number } {
-  return { width: coverageArcmin(mosaic.w), height: coverageArcmin(mosaic.h) };
+export function mosaicCoverage(mosaic: Mosaic, overlap: number): { width: number; height: number } {
+  return { width: coverageArcmin(mosaic.w, overlap), height: coverageArcmin(mosaic.h, overlap) };
 }
 
 // Smallest grid whose coverage contains the target's size
-export function suggestedMosaic(size: { width: number; height: number }): Mosaic {
+export function suggestedMosaic(size: { width: number; height: number }, overlap: number): Mosaic {
   const positionsFor = (arcmin: number) =>
-    Math.max(1, Math.ceil((arcmin - FIELD_OF_VIEW_ARCMIN) / (FIELD_OF_VIEW_ARCMIN * (1 - MOSAIC_OVERLAP))) + 1);
+    Math.max(1, Math.ceil((arcmin - FIELD_OF_VIEW_ARCMIN) / (FIELD_OF_VIEW_ARCMIN * (1 - overlap))) + 1);
   return { w: positionsFor(size.width), h: positionsFor(size.height) };
 }
 
@@ -356,7 +356,9 @@ export interface PlannedObject {
   exposure: ExposureSettings;
   activeFilters: string[];
   filterRows: FilterRow[];
-  mosaic: Mosaic;
+  mosaic: Mosaic; // the target's own grid if set, otherwise suggestedMosaic
+  suggestedMosaic: Mosaic; // smallest grid covering the catalog size at the current overlap (1×1 without a size)
+  mosaicCoverage: { width: number; height: number }; // arcminutes covered by `mosaic` at the current overlap
   isVisible: boolean;
   totalObservationTime: number; // minutes of imaging, excluding setup between targets
   observationScore: number;
