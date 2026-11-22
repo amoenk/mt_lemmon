@@ -17,24 +17,21 @@ const mosaicInfo = (obj: PlannedObject) => {
 const formatArcmin = (area: { width: number; height: number }) =>
   `${area.width.toFixed(0)}'×${area.height.toFixed(0)}'`;
 
-// Read-only: target size, current grid and what it covers, and a warning if it's too small
+// Read-only, one line: target size and grid (with coverage when it's a real mosaic), plus a warning if it's too small
 export const MosaicSummary: React.FC<{ obj: PlannedObject }> = ({ obj }) => {
   const info = mosaicInfo(obj);
-  if (!info) {
-    return <span>N/A</span>;
-  }
+  if (!info) return <span>size n/a</span>;
+  const isMosaic = obj.mosaic.w * obj.mosaic.h > 1;
   return (
-    <div className="space-y-0.5">
-      <div>{info.size.width}'×{info.size.height}'</div>
-      <div className="text-xs text-gray-400 whitespace-nowrap">
-        {obj.mosaic.w}×{obj.mosaic.h} = {formatArcmin(info.coverage)}
-      </div>
+    <span>
+      {info.size.width}'×{info.size.height}' · {obj.mosaic.w}×{obj.mosaic.h}
+      {isMosaic && <span className="text-gray-500"> ({formatArcmin(info.coverage)})</span>}
       {!info.coversTarget && (
-        <div className="text-xs text-amber-400 whitespace-nowrap">
-          ⚠ needs {info.suggestion.w}×{info.suggestion.h}
-        </div>
+        <span className="text-amber-400" title={`The ${obj.mosaic.w}×${obj.mosaic.h} grid covers ${formatArcmin(info.coverage)}, less than the target. Set the mosaic in Custom Settings.`}>
+          {' '}⚠ needs {info.suggestion.w}×{info.suggestion.h}
+        </span>
       )}
-    </div>
+    </span>
   );
 };
 

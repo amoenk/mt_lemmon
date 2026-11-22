@@ -52,99 +52,96 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
     return 'text-green-400';
   };
 
+  // Enabled targets first; otherwise keep the incoming order (visible first, then by transit)
+  const orderedObservations = [...observations].sort((a, b) =>
+    Number(disabledObjects.has(a.id)) - Number(disabledObjects.has(b.id))
+  );
+  
+  const maxAltitude = (obj: PlannedObject) =>
+    (obj.maxAltitudeDuringWindow || obj.timings.transitAltitude).toFixed(0);
+  
   return (
     <div className="bg-gray-900">
       {/* One card per target; the list lives in the narrow Targets panel at every screen width */}
       <div>
-        {observations.map((obj) => {
+        {orderedObservations.map((obj) => {
           const isExpanded = expandedRows.has(obj.id);
-          const isScheduled = scheduledObservations.some(s => s.objectId === obj.id);
+          const scheduled = scheduledObservations.find(s => s.objectId === obj.id);
           const exposure = getExposureRecommendations(obj.type);
           
           return (
             <div
               key={obj.id}
-              className={`border-b border-gray-800 p-4 ${
+              className={`border-b border-gray-800 px-3 py-2.5 ${
                 !obj.isVisible || disabledObjects.has(obj.id) ? 'opacity-50' : ''
               } ${
-                isScheduled ? 'bg-blue-900/10' : ''
+                scheduled ? 'bg-blue-900/10' : ''
               }`}
             >
-              {/* Card Header */}
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-start gap-3 flex-1">
-                  <input
-                    type="checkbox"
-                    checked={!disabledObjects.has(obj.id)}
-                    onChange={() => onToggleEnabled?.(obj.id)}
-                    className="w-4 h-4 mt-1 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
-                  />
-                  <div className="flex-1">
-                    <div className="font-medium">
+              <div className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={!disabledObjects.has(obj.id)}
+                  onChange={() => onToggleEnabled?.(obj.id)}
+                  className="w-4 h-4 mt-0.5 shrink-0 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+                  aria-label={`Include ${obj.name} in the plan`}
+                />
+                {/* Summary: the whole block toggles the details */}
+                <button
+                  type="button"
+                  onClick={() => onToggleExpanded(obj.id)}
+                  aria-expanded={isExpanded}
+                  className="flex-1 min-w-0 text-left"
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="flex-1 min-w-0 font-medium text-sm truncate">
                       {obj.commonName ? `${obj.name} ${obj.commonName}` : obj.name}
-                      {!obj.isVisible && <span className="text-xs text-red-400 ml-2">(Not visible)</span>}
                       {customSettings[obj.id] && Object.keys(customSettings[obj.id]).length > 0 && (
-                        <span className="text-xs text-blue-400 ml-2">(Custom)</span>
+                        <span className="ml-1.5 text-[10px] uppercase tracking-wide text-blue-400">custom</span>
                       )}
-                      {unscheduledReasons[obj.id] && (
-                        <div className="text-xs text-amber-400 mt-1">⚠ Not scheduled: {unscheduledReasons[obj.id]}</div>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-400 mt-1">
-                      {obj.type} • <span className={getPriorityColor(obj.priority)}>P{obj.priority}</span>
-                      {obj.magnitude && ` • Mag ${obj.magnitude.toFixed(1)}`}
-                    </div>
+                    </span>
+                    <span className={`text-xs font-semibold ${getPriorityColor(obj.priority)}`}>P{obj.priority}</span>
+                    <span className="text-gray-500 text-xs w-3">{isExpanded ? '▾' : '▸'}</span>
                   </div>
-                </div>
-              </div>
-              
-              {/* Key Info Grid */}
-              <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-                <div>
-                  <span className="text-gray-500">Transit:</span>
-                  <div className="font-medium text-blue-400">{formatTime(obj.timings.transitTime)}</div>
-                </div>
-                <div>
-                  <span className="text-gray-500">Max Alt:</span>
-                  <div className="font-medium">{obj.maxAltitudeDuringWindow ? obj.maxAltitudeDuringWindow.toFixed(0) : obj.timings.transitAltitude.toFixed(0)}°</div>
-                </div>
-                <div>
-                  <span className="text-gray-500">Score:</span>
-                  <div className="font-bold">{obj.observationScore?.toFixed(1) || '—'}</div>
-                </div>
-                <div>
-                  <span className="text-gray-500">Rise/Set:</span>
-                  <div className="text-xs">
+                  <div className="text-xs text-gray-400 mt-0.5 truncate">
+                    {obj.type.replace(/_/g, ' ')}
+                    {obj.magnitude && ` · mag ${obj.magnitude.toFixed(1)}`}
+                    {' · '}
                     {obj.timings.neverRises ? (
-                      <span className="text-gray-500">Never rises</span>
+                      <span className="text-gray-500">never rises</span>
                     ) : obj.timings.isCircumpolar ? (
-                      <span className="text-green-400">Circumpolar</span>
+                      <span title="Above the minimum altitude all night">
+                        <span className="text-green-400">circumpolar</span> · <span className="text-blue-400">⟂{formatTime(obj.timings.transitTime)}</span> {maxAltitude(obj)}°
+                      </span>
                     ) : (
-                      <div>
-                        ↑{formatTime(obj.timings.riseTime)} ↓{formatTime(obj.timings.setTime)}
-                      </div>
+                      <>
+                        <span title="Rises above the minimum altitude">↑{formatTime(obj.timings.riseTime)}</span>{' '}
+                        <span title="Transit: highest point, and peak altitude tonight" className="text-blue-400">⟂{formatTime(obj.timings.transitTime)}</span>{' '}
+                        <span title="Peak altitude in the observing window">{maxAltitude(obj)}°</span>{' '}
+                        <span title="Sinks below the minimum altitude">↓{formatTime(obj.timings.setTime)}</span>
+                      </>
                     )}
                   </div>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-gray-500">Size / Mosaic:</span>
-                  <div className="font-medium">
+                  <div className="text-xs text-gray-400 mt-0.5">
                     <MosaicSummary obj={obj} />
+                    {scheduled ? (
+                      <span className="text-blue-400">
+                        {' '}▶ {formatTime(scheduled.startTime)}–{formatTime(scheduled.endTime)} · {Math.round(scheduled.imagingTime)}m · airmass {scheduled.meanAirmass.toFixed(2)}
+                      </span>
+                    ) : !obj.isVisible ? (
+                      <span className="text-red-400"> · not visible tonight</span>
+                    ) : unscheduledReasons[obj.id] ? (
+                      <span className="text-amber-400" title={unscheduledReasons[obj.id]}>
+                        {' '}⚠ not scheduled: {unscheduledReasons[obj.id].startsWith('Too long') ? 'too long to fit' : 'no free slot'}
+                      </span>
+                    ) : null}
                   </div>
-                </div>
+                </button>
               </div>
-              
-              {/* Expand Button */}
-              <button
-                onClick={() => onToggleExpanded(obj.id)}
-                className="text-blue-400 hover:text-blue-300 text-sm w-full text-left"
-              >
-                {isExpanded ? '▼ Hide Details' : '▶ Show Details'}
-              </button>
               
               {/* Expanded Content */}
               {isExpanded && (
-                <div className="mt-4 pt-4 border-t border-gray-700">
+                <div className="mt-3 pt-3 border-t border-gray-700">
                   <div className="space-y-4">
                     <div>
                       <h4 className="font-bold text-sm mb-2">Observation Details</h4>
@@ -166,6 +163,10 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                         <div>
                           <span className="text-gray-400">Observation Window:</span>{' '}
                           {Math.round(obj.observableDuration)} minutes around transit
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Score:</span> {obj.observationScore.toFixed(1)}
+                          <span className="text-gray-500"> (a final tiebreaker when scheduling)</span>
                         </div>
                         {(() => {
                           const scheduled = scheduledObservations.find(s => s.objectId === obj.id);
