@@ -1,32 +1,37 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { deepSkyObjects } from '../data/deepSkyObjects';
-import { solarSystemObjects } from '../data/solarSystemObjects';
 import { 
   getMoonPhase, 
   calculateAltitude,
   raToDecimal,
   decToDecimal,
   MT_LEMMON_LOCATION,
-  getPlanetPosition,
   calculateObjectTimings,
   getExposureRecommendations,
   getSunTimes,
   getDarkWindow,
+  nextMoonlessNight,
   defaultFilterRows,
   targetMinutes,
   SINGLE_POSITION,
+  DEFAULT_MOSAIC_OVERLAP_PERCENT,
+  suggestedMosaic,
+  mosaicCoverage,
   type PlannedObject,
   type CustomObjectSettings
 } from '../utils/astronomy';
 import { SimpleGanttChart } from './SimpleGanttChart';
-import { FilterControls } from './FilterControls';
+import { SettingsDialog } from './SettingsDialog';
 import { ObservationTable } from './ObservationTable';
 import { encodeShare, decodeShare } from '../utils/shareCode';
 import { scheduleNight } from '../utils/scheduler';
 
-const DEFAULT_OBSERVATION_DATE = '2027-01-09';
 const DEFAULT_FILTER_CHANGE_MINUTES = 1;
 const DEFAULT_POSITION_OVERHEAD_MINUTES = 2;
+const DESKTOP_QUERY = '(min-width: 1024px)';
+const DEFAULT_TARGETS_PANEL_WIDTH = 440;
+const MIN_TARGETS_PANEL_WIDTH = 320;
+const MAX_TARGETS_PANEL_FRACTION = 0.6;
 export const ObservationPlanner: React.FC = () => {
   // Check URL params first, then localStorage, then defaults
   const loadSettingWithUrlParam = <T,>(key: string, urlParam: string, defaultValue: T): T => {
@@ -72,8 +77,11 @@ export const ObservationPlanner: React.FC = () => {
 
   const urlSettings = loadSettingsFromUrl();
 
+  // Evergreen default: the next moonless night from today
+  const [defaultDate] = useState(() => nextMoonlessNight(new Date()));
+
   const [selectedDate, setSelectedDate] = useState<string>(() => 
-    urlSettings?.selectedDate ?? loadSettingWithUrlParam('observationDate', 'date', DEFAULT_OBSERVATION_DATE)
+    urlSettings?.selectedDate ?? loadSettingWithUrlParam('observationDate', 'date', defaultDate)
   );
   const [startTime, setStartTime] = useState<string>(() => 
     urlSettings?.startTime ?? loadSettingWithUrlParam('startTime', 'start', getDarkWindow(selectedDate).startTime)
@@ -89,13 +97,19 @@ export const ObservationPlanner: React.FC = () => {
   );
   const [isNightMode, setIsNightMode] = useState<boolean>(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [disabledObjects, setDisabledObjects] = useState<Set<string>>(() => {
+  // Which targets are turned off. null means automatic: enable the highest-priority targets that fit the
+  // night (recomputed as the night changes) until the user edits a checkbox, imports, or opens a link.
+  const [manualDisabledObjects, setManualDisabledObjects] = useState<Set<string> | null>(() => {
     if (urlSettings) {
       return new Set(urlSettings.hiddenObjects);
     }
     const stored = localStorage.getItem('disabledObjects');
-    return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+    return stored ? new Set<string>(JSON.parse(stored)) : null;
   });
+  // The night a manual selection was made for, to flag when the date has since changed
+  const [targetsChosenFor, setTargetsChosenFor] = useState<string | null>(() =>
+    urlSettings ? urlSettings.selectedDate : JSON.parse(localStorage.getItem('targetsChosenFor') ?? 'null')
+  );
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importValue, setImportValue] = useState('');
@@ -109,6 +123,10 @@ export const ObservationPlanner: React.FC = () => {
 
   const [positionOverhead, setPositionOverhead] = useState<number>(() =>
     urlSettings?.positionOverhead ?? loadSettingWithUrlParam('positionOverhead', 'po', DEFAULT_POSITION_OVERHEAD_MINUTES)
+  );
+
+  const [mosaicOverlap, setMosaicOverlap] = useState<number>(() =>
+    urlSettings?.mosaicOverlap ?? loadSettingWithUrlParam('mosaicOverlap', 'overlap', DEFAULT_MOSAIC_OVERLAP_PERCENT)
   );
 
   const [customSettings, setCustomSettings] = useState<Record<string, CustomObjectSettings>>(() => {
@@ -149,8 +167,16 @@ export const ObservationPlanner: React.FC = () => {
   }, [setupTime]);
 
   useEffect(() => {
-    localStorage.setItem('disabledObjects', JSON.stringify(Array.from(disabledObjects)));
-  }, [disabledObjects]);
+    if (manualDisabledObjects) {
+      localStorage.setItem('disabledObjects', JSON.stringify(Array.from(manualDisabledObjects)));
+    } else {
+      localStorage.removeItem('disabledObjects');
+    }
+  }, [manualDisabledObjects]);
+
+  useEffect(() => {
+    localStorage.setItem('targetsChosenFor', JSON.stringify(targetsChosenFor));
+  }, [targetsChosenFor]);
 
   useEffect(() => {
     localStorage.setItem('filterChangeTime', JSON.stringify(filterChangeTime));
@@ -159,6 +185,10 @@ export const ObservationPlanner: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('positionOverhead', JSON.stringify(positionOverhead));
   }, [positionOverhead]);
+
+  useEffect(() => {
+    localStorage.setItem('mosaicOverlap', JSON.stringify(mosaicOverlap));
+  }, [mosaicOverlap]);
 
   useEffect(() => {
     localStorage.setItem('customObjectSettingsV2', JSON.stringify(customSettings));
@@ -269,7 +299,10 @@ export const ObservationPlanner: React.FC = () => {
       const objectCustomSettings = customSettings[obj.name];
       const filterRows = objectCustomSettings?.filterRows ?? defaultFilterRows(exposure);
       const activeFilters = [...new Set(filterRows.map(row => row.filter))];
-      const mosaic = objectCustomSettings?.mosaic ?? SINGLE_POSITION;
+      // Default grid: the smallest that covers the catalog size at the current overlap
+      const overlap = mosaicOverlap / 100;
+      const suggestedGrid = obj.size ? suggestedMosaic(obj.size, overlap) : SINGLE_POSITION;
+      const mosaic = objectCustomSettings?.mosaic ?? suggestedGrid;
       const totalObservationTime = targetMinutes(filterRows, mosaic, filterChangeTime, positionOverhead);
       
       // Check if object is visible during our observation window
@@ -331,6 +364,8 @@ export const ObservationPlanner: React.FC = () => {
         activeFilters,
         filterRows,
         mosaic,
+        suggestedMosaic: suggestedGrid,
+        mosaicCoverage: mosaicCoverage(mosaic, overlap),
         isVisible,
         totalObservationTime,
         observationScore,
@@ -338,90 +373,7 @@ export const ObservationPlanner: React.FC = () => {
       };
     });
 
-    const planets = solarSystemObjects.filter(obj => obj.type === 'planet').map(planet => {
-      const position = getPlanetPosition(planet.name, observationDate);
-      
-      if (position) {
-        const timings = calculateObjectTimings(position.ra, position.dec, observationDate, minAltitude);
-        
-        // Calculate max altitude during observation window for planets
-        let maxAltitudeDuringWindow = 0;
-        const checkInterval = 15; // Check every 15 minutes
-        const totalMinutes = (observationEndDate.getTime() - observationDate.getTime()) / 60000;
-        const steps = Math.ceil(totalMinutes / checkInterval);
-        
-        for (let i = 0; i <= steps; i++) {
-          const checkTime = new Date(observationDate.getTime() + (i * checkInterval * 60000));
-          const planetPosAtTime = getPlanetPosition(planet.name, checkTime);
-          if (planetPosAtTime) {
-            const alt = calculateAltitude(planetPosAtTime.ra, planetPosAtTime.dec, checkTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
-            if (alt > maxAltitudeDuringWindow) {
-              maxAltitudeDuringWindow = alt;
-            }
-          }
-        }
-        const exposure = getExposureRecommendations('planet');
-        
-        // Use custom settings if available
-        const objectCustomSettings = customSettings[planet.name];
-        const filterRows = objectCustomSettings?.filterRows ?? defaultFilterRows(exposure);
-        const activeFilters = [...new Set(filterRows.map(row => row.filter))];
-        
-        // Planets are captured as video: a fixed capture time per filter
-        const captureTime = 10;
-        const totalObservationTime = captureTime * filterRows.length;
-        
-        const isVisible = timings.transitAltitude >= minAltitude;
-        
-        const priorityMap: { [key: string]: number } = {
-          'must_have': 10,
-          'high': 8,
-          'medium': 5,
-          'low': 3
-        };
-        const defaultPriority = priorityMap[planet.priority] || 5;
-        const priorityValue = objectCustomSettings?.priority || defaultPriority;
-        
-        let observationScore = 0;
-        if (isVisible && timings.transitTime) {
-          const minutesFromTransit = Math.abs(timings.transitTime.getTime() - observationDate.getTime()) / (1000 * 60);
-          const timeScore = Math.max(0, 100 - (minutesFromTransit / 60) * 10);
-          const altScore = Math.min(100, (timings.transitAltitude / 90) * 100);
-          const flexibilityScore = 100 - Math.min(80, totalObservationTime * 0.5);
-          
-          observationScore = ((timeScore * 0.4 + altScore * 0.3 + flexibilityScore * 0.3) * (priorityValue / 5));
-        }
-        
-        const observableDuration = timings.setTime && timings.riseTime 
-          ? (timings.setTime.getTime() - timings.riseTime.getTime()) / 60000
-          : 0;
-        
-        return {
-          id: planet.name,
-          name: planet.name,
-          type: 'planet',
-          priority: priorityValue,
-          defaultPriority,
-          size: undefined,
-          currentAltitude: position.altitude,
-          timings,
-          maxAltitudeDuringWindow,
-          exposure,
-          activeFilters,
-          filterRows,
-          mosaic: SINGLE_POSITION,
-          isVisible,
-          totalObservationTime,
-          observationScore,
-          observableDuration
-        };
-      }
-      return null;
-    }).filter((item): item is NonNullable<typeof item> => item !== null);
-
-    const combined = [...deepSky, ...planets];
-    
-    return combined.sort((a, b) => {
+    return deepSky.sort((a, b) => {
       // First, separate visible from non-visible
       if (a.isVisible !== b.isVisible) {
         return a.isVisible ? -1 : 1;
@@ -433,7 +385,24 @@ export const ObservationPlanner: React.FC = () => {
       
       return aTransitTime - bTransitTime;
     });
-  }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime, positionOverhead]);
+  }, [observationDate, observationEndDate, minAltitude, customSettings, filterChangeTime, positionOverhead, mosaicOverlap]);
+
+  const scheduleOptions = useMemo(() => ({
+    windowStart: observationDate,
+    windowEnd: observationEndDate,
+    minAltitude,
+    setupTime,
+    filterChangeTime,
+    positionOverhead
+  }), [observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime, positionOverhead]);
+
+  // Automatic pick: schedule every visible target by priority and turn off the ones that don't fit
+  const disabledObjects = useMemo(() => {
+    if (manualDisabledObjects) return manualDisabledObjects;
+    const { scheduled } = scheduleNight(allObjects.filter(obj => obj.isVisible), scheduleOptions);
+    const fits = new Set(scheduled.map(s => s.objectId));
+    return new Set(allObjects.filter(obj => !fits.has(obj.id)).map(obj => obj.id));
+  }, [manualDisabledObjects, allObjects, scheduleOptions]);
 
   const visibleObjects = useMemo(
     () => allObjects.filter(obj => obj.isVisible && !disabledObjects.has(obj.id)),
@@ -441,14 +410,10 @@ export const ObservationPlanner: React.FC = () => {
   );
 
   // Each target in its lowest-airmass free slot, highest priority first
-  const { scheduled: scheduledObservations, unscheduledReasons } = useMemo(() => scheduleNight(visibleObjects, {
-    windowStart: observationDate,
-    windowEnd: observationEndDate,
-    minAltitude,
-    setupTime,
-    filterChangeTime,
-    positionOverhead
-  }), [visibleObjects, observationDate, observationEndDate, minAltitude, setupTime, filterChangeTime, positionOverhead]);
+  const { scheduled: scheduledObservations, unscheduledReasons } = useMemo(
+    () => scheduleNight(visibleObjects, scheduleOptions),
+    [visibleObjects, scheduleOptions]
+  );
 
   const toggleExpanded = (id: string) => {
     const newExpanded = new Set(expandedRows);
@@ -460,6 +425,7 @@ export const ObservationPlanner: React.FC = () => {
     setExpandedRows(newExpanded);
   };
 
+  // Editing a checkbox turns the current selection (automatic or not) into the user's own
   const toggleObjectEnabled = (id: string) => {
     const newDisabled = new Set(disabledObjects);
     if (newDisabled.has(id)) {
@@ -467,7 +433,57 @@ export const ObservationPlanner: React.FC = () => {
     } else {
       newDisabled.add(id);
     }
-    setDisabledObjects(newDisabled);
+    setManualDisabledObjects(newDisabled);
+    setTargetsChosenFor(selectedDate);
+  };
+
+  // Back to automatic: the highest-priority targets that fit the current night
+  const pickBestTargets = () => {
+    setManualDisabledObjects(null);
+    setTargetsChosenFor(null);
+  };
+
+  // Layout: settings dialog and the targets panel (right column on desktop, full-screen overlay below 1024px)
+  const [showSettings, setShowSettings] = useState(false);
+  const [mobileTargetsOpen, setMobileTargetsOpen] = useState(false);
+  const [targetsPanelOpen, setTargetsPanelOpen] = useState<boolean>(() =>
+    JSON.parse(localStorage.getItem('targetsPanelOpen') ?? 'true')
+  );
+  const [targetsPanelWidth, setTargetsPanelWidth] = useState<number>(() =>
+    JSON.parse(localStorage.getItem('targetsPanelWidth') ?? String(DEFAULT_TARGETS_PANEL_WIDTH))
+  );
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
+
+  useEffect(() => {
+    const query = window.matchMedia(DESKTOP_QUERY);
+    const onChange = () => setIsDesktop(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('targetsPanelOpen', JSON.stringify(targetsPanelOpen));
+  }, [targetsPanelOpen]);
+
+  useEffect(() => {
+    localStorage.setItem('targetsPanelWidth', JSON.stringify(targetsPanelWidth));
+  }, [targetsPanelWidth]);
+
+  // Drag the handle to resize: the panel sits at the right edge, so its width is the distance from the pointer to the edge
+  const startPanelResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const onMove = (move: PointerEvent) => {
+      const maxWidth = window.innerWidth * MAX_TARGETS_PANEL_FRACTION;
+      setTargetsPanelWidth(Math.round(Math.min(maxWidth, Math.max(MIN_TARGETS_PANEL_WIDTH, window.innerWidth - move.clientX))));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      document.body.style.userSelect = '';
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   };
 
   const updateObjectSettings = (objectId: string, settings: CustomObjectSettings) => {
@@ -486,6 +502,7 @@ export const ObservationPlanner: React.FC = () => {
       setupTime,
       filterChangeTime,
       positionOverhead,
+      mosaicOverlap,
       hiddenObjects: Array.from(disabledObjects),
       customSettings
     });
@@ -534,7 +551,9 @@ export const ObservationPlanner: React.FC = () => {
       setSetupTime(settings.setupTime);
       setFilterChangeTime(settings.filterChangeTime);
       setPositionOverhead(settings.positionOverhead);
-      setDisabledObjects(new Set(settings.hiddenObjects));
+      setMosaicOverlap(settings.mosaicOverlap);
+      setManualDisabledObjects(new Set(settings.hiddenObjects));
+      setTargetsChosenFor(settings.selectedDate);
       setCustomSettings(settings.customSettings);
       
       setImportSuccess(true);
@@ -558,26 +577,29 @@ export const ObservationPlanner: React.FC = () => {
     localStorage.removeItem('minAltitude');
     localStorage.removeItem('setupTime');
     localStorage.removeItem('disabledObjects');
+    localStorage.removeItem('targetsChosenFor');
     localStorage.removeItem('filterChangeTime');
     localStorage.removeItem('positionOverhead');
+    localStorage.removeItem('mosaicOverlap');
     localStorage.removeItem('customObjectSettingsV2');
     
     // Reset to defaults
-    setSelectedDate(DEFAULT_OBSERVATION_DATE);
-    syncToDarkWindow(DEFAULT_OBSERVATION_DATE);
+    setSelectedDate(defaultDate);
+    syncToDarkWindow(defaultDate);
     setMinAltitude(15);
     setSetupTime(10);
     setFilterChangeTime(DEFAULT_FILTER_CHANGE_MINUTES);
     setPositionOverhead(DEFAULT_POSITION_OVERHEAD_MINUTES);
-    setDisabledObjects(new Set());
+    setMosaicOverlap(DEFAULT_MOSAIC_OVERLAP_PERCENT);
+    pickBestTargets();
     setCustomSettings({});
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 overflow-x-hidden">
-      <header className="bg-black/50 backdrop-blur-sm border-b border-gray-800">
-        <div className="container-content">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="h-screen flex flex-col bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 overflow-hidden">
+      <header className="shrink-0 bg-black/50 backdrop-blur-sm border-b border-gray-800">
+        <div className="px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center space-x-2 sm:space-x-3">
               <div className="text-xl sm:text-2xl">🔭</div>
               <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
@@ -586,7 +608,23 @@ export const ObservationPlanner: React.FC = () => {
               </h1>
             </div>
             
-            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <button
+                onClick={() => (isDesktop ? setTargetsPanelOpen(!targetsPanelOpen) : setMobileTargetsOpen(true))}
+                className={`flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 ${isDesktop && targetsPanelOpen ? 'ring-1 ring-blue-500/60' : ''}`}
+                title={isDesktop ? (targetsPanelOpen ? 'Hide the targets panel' : 'Show the targets panel') : 'Show targets'}
+              >
+                <span className="text-sm sm:text-base">📋</span>
+                <span className="text-xs sm:text-sm font-medium">Targets ({visibleObjects.length})</span>
+              </button>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                title="Date, times and settings"
+              >
+                <span className="text-sm sm:text-base">⚙</span>
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Settings</span>
+              </button>
               <button
                 onClick={handleExport}
                 className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
@@ -602,14 +640,6 @@ export const ObservationPlanner: React.FC = () => {
               >
                 <span className="text-sm sm:text-base">📥</span>
                 <span className="text-xs sm:text-sm font-medium hidden sm:inline">Import</span>
-              </button>
-              <button
-                onClick={resetSettings}
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
-                title="Reset all settings to defaults"
-              >
-                <span className="text-sm sm:text-base">↺</span>
-                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Reset</span>
               </button>
               <button
                 onClick={() => setIsNightMode(!isNightMode)}
@@ -630,27 +660,123 @@ export const ObservationPlanner: React.FC = () => {
         </div>
       </header>
 
-      <div className="main-content">
-        {/* Gantt Chart - Full width on mobile */}
-        {visibleObjects.length > 0 && (
-          <div className="gantt-section">
-            <SimpleGanttChart
-              observations={visibleObjects}
-              moonPhase={moonInfo}
-              startTime={observationDate}
-              endTime={observationEndDate}
-              sunTimes={sunTimes}
-              isSyncedToDark={isSyncedToDark}
-              onSyncToDark={() => syncToDarkWindow(selectedDate)}
-              expandedRows={expandedRows}
-              scheduledObservations={scheduledObservations}
-            />
+      <div className="flex flex-1 min-h-0">
+        {/* Main column: timeline and conditions, scrolls on its own */}
+        <main className="flex-1 min-w-0 overflow-y-auto py-4 sm:py-6 space-y-6">
+          {visibleObjects.length > 0 ? (
+            <div className="gantt-section">
+              <SimpleGanttChart
+                observations={visibleObjects}
+                moonPhase={moonInfo}
+                startTime={observationDate}
+                endTime={observationEndDate}
+                sunTimes={sunTimes}
+                isSyncedToDark={isSyncedToDark}
+                onSyncToDark={() => syncToDarkWindow(selectedDate)}
+                expandedRows={expandedRows}
+                scheduledObservations={scheduledObservations}
+              />
+            </div>
+          ) : (
+            <div className="px-4 sm:px-6 lg:px-8 text-gray-400">
+              No targets are visible and enabled for this night. Open Targets to enable some, or Settings to change the date or window.
+            </div>
+          )}
+
+          {/* Conditions Info */}
+          <div className="px-4 sm:px-6 lg:px-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="bg-gray-900 p-4 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <span className="text-2xl">📍</span>
+                  <h3 className="font-semibold">Location</h3>
+                </div>
+                <p className="text-sm text-gray-400">Mt. Lemmon Sky Center</p>
+                <p className="text-xs text-gray-500">32.44°N, 110.79°W • 2,791m</p>
+                <p className="text-xs text-gray-500">MST (UTC-7, no DST)</p>
+              </div>
+              
+              <div className="bg-gray-900 p-4 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <span className="text-2xl">🌙</span>
+                  <h3 className="font-semibold">Moon Phase</h3>
+                </div>
+                <p className="text-sm text-gray-400">{moonInfo.phase}</p>
+                <p className="text-xs text-gray-500">{moonInfo.illumination.toFixed(0)}% illuminated</p>
+              </div>
+              
+              <div className="bg-gray-900 p-4 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <span className="text-2xl">✨</span>
+                  <h3 className="font-semibold">Observable</h3>
+                </div>
+                <p className="text-2xl font-bold text-blue-400">{visibleObjects.length}</p>
+                <p className="text-xs text-gray-500">
+                  of {allObjects.length} objects visible
+                </p>
+              </div>
+            </div>
           </div>
+        </main>
+
+        {/* Drag handle to resize the targets panel (desktop) */}
+        {isDesktop && targetsPanelOpen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize targets panel"
+            onPointerDown={startPanelResize}
+            className="w-1.5 shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500/60 active:bg-blue-500"
+          />
         )}
 
-        {/* Filter Controls */}
-        <div className="container-content">
-          <FilterControls
+        {/* Targets panel: right-side column on desktop, full-screen overlay on smaller screens */}
+        {(isDesktop ? targetsPanelOpen : mobileTargetsOpen) && (
+          <aside
+            className={isDesktop
+              ? 'shrink-0 flex flex-col min-h-0 bg-gray-950'
+              : 'fixed inset-0 z-40 flex flex-col bg-gray-950'}
+            style={isDesktop ? { width: targetsPanelWidth } : undefined}
+          >
+            <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-800">
+              {isDesktop ? (
+                <h2 className="font-bold">Targets <span className="font-normal text-gray-400">· {visibleObjects.length} of {allObjects.length} enabled and visible</span></h2>
+              ) : (
+                <button onClick={() => setMobileTargetsOpen(false)} className="text-blue-400 hover:text-blue-300 font-medium">
+                  ← Back
+                </button>
+              )}
+              {isDesktop ? (
+                <button
+                  onClick={() => setTargetsPanelOpen(false)}
+                  className="text-gray-400 hover:text-white text-sm px-2"
+                  title="Hide the targets panel"
+                >
+                  Hide →
+                </button>
+              ) : (
+                <h2 className="font-bold">Targets <span className="font-normal text-gray-400">· {visibleObjects.length}</span></h2>
+              )}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <ObservationTable
+                observations={allObjects}
+                expandedRows={expandedRows}
+                scheduledObservations={scheduledObservations}
+                unscheduledReasons={unscheduledReasons}
+                disabledObjects={disabledObjects}
+                customSettings={customSettings}
+                onToggleExpanded={toggleExpanded}
+                onToggleEnabled={toggleObjectEnabled}
+                onUpdateSettings={updateObjectSettings}
+              />
+            </div>
+          </aside>
+        )}
+      </div>
+
+      {showSettings && (
+        <SettingsDialog
           observationDate={selectedDate}
           startTime={startTime}
           endTime={endTime}
@@ -658,6 +784,7 @@ export const ObservationPlanner: React.FC = () => {
           setupTime={setupTime}
           filterChangeTime={filterChangeTime}
           positionOverhead={positionOverhead}
+          mosaicOverlap={mosaicOverlap}
           onDateChange={changeDate}
           onStartTimeChange={setStartTime}
           onEndTimeChange={setEndTime}
@@ -665,59 +792,16 @@ export const ObservationPlanner: React.FC = () => {
           onSetupTimeChange={setSetupTime}
           onFilterChangeTimeChange={setFilterChangeTime}
           onPositionOverheadChange={setPositionOverhead}
-          />
-        </div>
-
-        {/* Conditions Info */}
-        <div className="container-content">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          <div className="bg-gray-900 p-4 rounded-lg">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-2xl">📍</span>
-              <h3 className="font-semibold">Location</h3>
-            </div>
-            <p className="text-sm text-gray-400">Mt. Lemmon Sky Center</p>
-            <p className="text-xs text-gray-500">32.44°N, 110.79°W • 2,791m</p>
-            <p className="text-xs text-gray-500">MST (UTC-7, no DST)</p>
-          </div>
-          
-          <div className="bg-gray-900 p-4 rounded-lg">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-2xl">🌙</span>
-              <h3 className="font-semibold">Moon Phase</h3>
-            </div>
-            <p className="text-sm text-gray-400">{moonInfo.phase}</p>
-            <p className="text-xs text-gray-500">{moonInfo.illumination.toFixed(0)}% illuminated</p>
-          </div>
-          
-          <div className="bg-gray-900 p-4 rounded-lg">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-2xl">✨</span>
-              <h3 className="font-semibold">Observable</h3>
-            </div>
-            <p className="text-2xl font-bold text-blue-400">{visibleObjects.length}</p>
-            <p className="text-xs text-gray-500">
-              of {allObjects.length} objects visible
-            </p>
-          </div>
-          </div>
-        </div>
-
-        {/* Observation Table */}
-        <div className="container-content">
-          <ObservationTable
-          observations={allObjects}
-          expandedRows={expandedRows}
-          scheduledObservations={scheduledObservations}
-          unscheduledReasons={unscheduledReasons}
-          disabledObjects={disabledObjects}
-          customSettings={customSettings}
-          onToggleExpanded={toggleExpanded}
-          onToggleEnabled={toggleObjectEnabled}
-          onUpdateSettings={updateObjectSettings}
+          onMosaicOverlapChange={setMosaicOverlap}
+          isSyncedToDark={isSyncedToDark}
+          onSyncToDark={() => syncToDarkWindow(selectedDate)}
+          onReset={resetSettings}
+          targetsAreAutomatic={manualDisabledObjects === null}
+          targetsChosenFor={targetsChosenFor}
+          onPickBestTargets={pickBestTargets}
+          onClose={() => setShowSettings(false)}
         />
-        </div>
-      </div>
+      )}
 
       {/* Export Modal */}
       {showExportModal && (

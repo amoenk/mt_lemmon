@@ -1,15 +1,15 @@
 import React from 'react';
-import { mosaicCoverage, suggestedMosaic, type Mosaic, type PlannedObject } from '../utils/astronomy';
+import type { Mosaic, PlannedObject } from '../utils/astronomy';
 import { PositiveNumberInput } from './PositiveNumberInput';
 
-// Mosaic grid details for a target, or null for targets without a catalog size (e.g. planets)
+// Mosaic grid details for a target, or null for targets without a catalog size
 const mosaicInfo = (obj: PlannedObject) => {
-  if (!obj.size || obj.type === 'planet') return null;
-  const coverage = mosaicCoverage(obj.mosaic);
+  if (!obj.size) return null;
+  const coverage = obj.mosaicCoverage;
   return {
     size: obj.size,
     coverage,
-    suggestion: suggestedMosaic(obj.size),
+    suggestion: obj.suggestedMosaic,
     coversTarget: coverage.width >= obj.size.width && coverage.height >= obj.size.height
   };
 };
@@ -17,24 +17,21 @@ const mosaicInfo = (obj: PlannedObject) => {
 const formatArcmin = (area: { width: number; height: number }) =>
   `${area.width.toFixed(0)}'×${area.height.toFixed(0)}'`;
 
-// Read-only: target size, current grid and what it covers, and a warning if it's too small
+// Read-only, one line: target size and grid (with coverage when it's a real mosaic), plus a warning if it's too small
 export const MosaicSummary: React.FC<{ obj: PlannedObject }> = ({ obj }) => {
   const info = mosaicInfo(obj);
-  if (!info) {
-    return <span>{obj.size ? `${obj.size.width}'×${obj.size.height}'` : 'N/A'}</span>;
-  }
+  if (!info) return <span>size n/a</span>;
+  const isMosaic = obj.mosaic.w * obj.mosaic.h > 1;
   return (
-    <div className="space-y-0.5">
-      <div>{info.size.width}'×{info.size.height}'</div>
-      <div className="text-xs text-gray-400 whitespace-nowrap">
-        {obj.mosaic.w}×{obj.mosaic.h} = {formatArcmin(info.coverage)}
-      </div>
+    <span>
+      {info.size.width}'×{info.size.height}' · {obj.mosaic.w}×{obj.mosaic.h}
+      {isMosaic && <span className="text-gray-500"> ({formatArcmin(info.coverage)})</span>}
       {!info.coversTarget && (
-        <div className="text-xs text-amber-400 whitespace-nowrap">
-          ⚠ needs {info.suggestion.w}×{info.suggestion.h}
-        </div>
+        <span className="text-amber-400" title={`The ${obj.mosaic.w}×${obj.mosaic.h} grid covers ${formatArcmin(info.coverage)}, less than the target. Set the mosaic in Custom Settings.`}>
+          {' '}⚠ needs {info.suggestion.w}×{info.suggestion.h}
+        </span>
       )}
-    </div>
+    </span>
   );
 };
 

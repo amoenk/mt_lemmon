@@ -4,9 +4,6 @@ import { FILTER_COLORS } from '../utils/filterColors';
 import { PositiveNumberInput } from './PositiveNumberInput';
 
 const filtersForType = (type: string): string[] => {
-  if (type === 'planet') {
-    return ['Luminance', 'IR850', 'Red', 'Green', 'Blue', 'CH4'];
-  }
   if (type === 'nebula' || type === 'planetary_nebula' || type === 'supernova_remnant') {
     return ['Luminance', 'Ha', 'OIII', 'SII', 'Red', 'Green', 'Blue'];
   }
@@ -22,7 +19,6 @@ interface FilterRowsEditorProps {
 export const FilterRowsEditor: React.FC<FilterRowsEditorProps> = ({ obj, onChange }) => {
   const rows = obj.filterRows;
   const filters = filtersForType(obj.type);
-  const isPlanet = obj.type === 'planet';
   
   const updateRow = (index: number, changes: Partial<FilterRow>) =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...changes } : row)));
@@ -50,8 +46,7 @@ export const FilterRowsEditor: React.FC<FilterRowsEditorProps> = ({ obj, onChang
             >
               {filters.map(filter => <option key={filter} value={filter}>{filter}</option>)}
             </select>
-            {!isPlanet && (
-              <div className="flex items-center gap-1.5 w-full sm:w-auto pl-4 sm:pl-0 order-last sm:order-none">
+                          <div className="flex items-center gap-1.5 w-full sm:w-auto pl-4 sm:pl-0 order-last sm:order-none">
                 <PositiveNumberInput
                   value={row.count}
                   onCommit={(count) => updateRow(i, { count })}
@@ -76,7 +71,6 @@ export const FilterRowsEditor: React.FC<FilterRowsEditorProps> = ({ obj, onChang
                   <option value={2}>2×2</option>
                 </select>
               </div>
-            )}
             <button
               onClick={() => onChange(rows.filter((_, j) => j !== i))}
               disabled={rows.length === 1}

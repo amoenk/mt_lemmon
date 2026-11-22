@@ -255,21 +255,21 @@ const TELESCOPE_FOCAL_LENGTH_MM = 5695;
 const SENSOR_SIZE_MM = 36.864;
 export const FIELD_OF_VIEW_ARCMIN =
   2 * Math.atan(SENSOR_SIZE_MM / 2 / TELESCOPE_FOCAL_LENGTH_MM) * (180 / Math.PI) * 60;
-export const MOSAIC_OVERLAP = 0.1;
+export const DEFAULT_MOSAIC_OVERLAP_PERCENT = 10;
 export const SINGLE_POSITION: Mosaic = { w: 1, h: 1 };
 
-// Sky covered by `positions` frames in a line, each overlapping the next by MOSAIC_OVERLAP
-const coverageArcmin = (positions: number): number =>
-  FIELD_OF_VIEW_ARCMIN * (positions - MOSAIC_OVERLAP * (positions - 1));
+// Sky covered by `positions` frames in a line, each overlapping the next by `overlap` (a fraction of the field)
+const coverageArcmin = (positions: number, overlap: number): number =>
+  FIELD_OF_VIEW_ARCMIN * (positions - overlap * (positions - 1));
 
-export function mosaicCoverage(mosaic: Mosaic): { width: number; height: number } {
-  return { width: coverageArcmin(mosaic.w), height: coverageArcmin(mosaic.h) };
+export function mosaicCoverage(mosaic: Mosaic, overlap: number): { width: number; height: number } {
+  return { width: coverageArcmin(mosaic.w, overlap), height: coverageArcmin(mosaic.h, overlap) };
 }
 
 // Smallest grid whose coverage contains the target's size
-export function suggestedMosaic(size: { width: number; height: number }): Mosaic {
+export function suggestedMosaic(size: { width: number; height: number }, overlap: number): Mosaic {
   const positionsFor = (arcmin: number) =>
-    Math.max(1, Math.ceil((arcmin - FIELD_OF_VIEW_ARCMIN) / (FIELD_OF_VIEW_ARCMIN * (1 - MOSAIC_OVERLAP))) + 1);
+    Math.max(1, Math.ceil((arcmin - FIELD_OF_VIEW_ARCMIN) / (FIELD_OF_VIEW_ARCMIN * (1 - overlap))) + 1);
   return { w: positionsFor(size.width), h: positionsFor(size.height) };
 }
 
@@ -356,7 +356,9 @@ export interface PlannedObject {
   exposure: ExposureSettings;
   activeFilters: string[];
   filterRows: FilterRow[];
-  mosaic: Mosaic;
+  mosaic: Mosaic; // the target's own grid if set, otherwise suggestedMosaic
+  suggestedMosaic: Mosaic; // smallest grid covering the catalog size at the current overlap (1×1 without a size)
+  mosaicCoverage: { width: number; height: number }; // arcminutes covered by `mosaic` at the current overlap
   isVisible: boolean;
   totalObservationTime: number; // minutes of imaging, excluding setup between targets
   observationScore: number;
@@ -379,17 +381,6 @@ export function getMagnificationRecommendation(
   }
   
   const maxDimension = Math.max(size.width, size.height); // arcminutes
-  
-  // For planets, use high magnification
-  if (objectType === 'planet') {
-    // Planets are tiny (< 1 arcmin)
-    return {
-      magnification: 'High (300-500x)',
-      eyepiece: '8-13mm',
-      fov: '~0.15°',
-      notes: 'Use highest power seeing permits. Barlow recommended.'
-    };
-  }
   
   // For extended objects, choose based on size
   if (maxDimension > 120) {
@@ -470,12 +461,6 @@ export function getExposureRecommendations(
       return {
         rows: [row('Luminance', 10, 60)],
         notes: 'Short frames for bright stars.'
-      };
-    
-    case 'planet':
-      return {
-        rows: [row('Luminance', 1, 1)],
-        notes: 'High frame rate video capture. Add filters for detail.'
       };
     
     default:
@@ -599,35 +584,6 @@ export function getMoonUpPeriods(from: Date, to: Date): MoonUpPeriod[] {
   return periods;
 }
 
-export function getPlanetPosition(planet: string, date: Date): { ra: number; dec: number; altitude: number; azimuth: number } | null {
-  // Convert planet name to Body enum value
-  let bodyName = planet;
-  if (planet === 'Uranus') bodyName = 'Uranus';
-  if (planet === 'Neptune') bodyName = 'Neptune';
-  if (planet === 'Jupiter') bodyName = 'Jupiter';
-  if (planet === 'Saturn') bodyName = 'Saturn';
-  if (planet === 'Mars') bodyName = 'Mars';
-  
-  const planetBody = Astronomy.Body[bodyName as keyof typeof Astronomy.Body];
-  if (planetBody === undefined) return null;
-  
-  const time = new Astronomy.AstroTime(date);
-  const observer = new Astronomy.Observer(
-    MT_LEMMON_LOCATION.latitude,
-    MT_LEMMON_LOCATION.longitude,
-    MT_LEMMON_LOCATION.elevation
-  );
-  
-  const equ = Astronomy.Equator(planetBody, time, observer, false, true);
-  const hor = Astronomy.Horizon(time, observer, equ.ra, equ.dec, 'normal');
-  
-  return {
-    ra: equ.ra,
-    dec: equ.dec,
-    altitude: hor.altitude,
-    azimuth: hor.azimuth
-  };
-}
 export interface SunTimes {
   sunset: Date;
   astroDusk: Date; // Sun reaches -18°: astronomical dark begins
@@ -668,4 +624,32 @@ export function getDarkWindow(date: string): { startTime: string; endTime: strin
     startTime: toPhoenixHHMM(new Date(Math.ceil(astroDusk.getTime() / minute) * minute)),
     endTime: toPhoenixHHMM(new Date(Math.floor(astroDawn.getTime() / minute) * minute))
   };
+}
+
+// A night counts as moonless when the Moon is up for at most this long during astronomical dark
+export const MAX_MOONLIGHT_MINUTES = 30;
+
+// YYYY-MM-DD of a moment at Mt. Lemmon (MST, UTC-7)
+const localDateString = (date: Date): string =>
+  date.toLocaleDateString('en-CA', { timeZone: 'America/Phoenix' });
+
+// Minutes the Moon is above the horizon during the night's astronomical dark
+export function moonlightMinutes(date: string): number {
+  const { astroDusk, astroDawn } = getSunTimes(date);
+  return getMoonUpPeriods(astroDusk, astroDawn).reduce((sum, period) =>
+    sum + Math.max(0, Math.min(period.setTime.getTime(), astroDawn.getTime()) - Math.max(period.riseTime.getTime(), astroDusk.getTime())) / 60000,
+  0);
+}
+
+// The first moonless night whose dark hasn't ended yet, starting from the night in progress at `now`
+// (after midnight, that's the night that began the previous evening)
+export function nextMoonlessNight(now: Date): string {
+  const night = new Date(now.getTime() - 24 * 3600000);
+  for (;;) {
+    const date = localDateString(night);
+    if (getSunTimes(date).astroDawn > now && moonlightMinutes(date) <= MAX_MOONLIGHT_MINUTES) {
+      return date;
+    }
+    night.setTime(night.getTime() + 24 * 3600000);
+  }
 }

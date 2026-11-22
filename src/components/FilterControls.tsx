@@ -8,6 +8,7 @@ interface FilterControlsProps {
   setupTime: number;
   filterChangeTime: number;
   positionOverhead: number;
+  mosaicOverlap: number;
   onDateChange: (date: string) => void;
   onStartTimeChange: (time: string) => void;
   onEndTimeChange: (time: string) => void;
@@ -15,6 +16,7 @@ interface FilterControlsProps {
   onSetupTimeChange: (time: number) => void;
   onFilterChangeTimeChange: (time: number) => void;
   onPositionOverheadChange: (time: number) => void;
+  onMosaicOverlapChange: (percent: number) => void;
 }
 
 export const FilterControls: React.FC<FilterControlsProps> = ({
@@ -25,17 +27,19 @@ export const FilterControls: React.FC<FilterControlsProps> = ({
   setupTime,
   filterChangeTime,
   positionOverhead,
+  mosaicOverlap,
   onDateChange,
   onStartTimeChange,
   onEndTimeChange,
   onMinAltitudeChange,
   onSetupTimeChange,
   onFilterChangeTimeChange,
-  onPositionOverheadChange
+  onPositionOverheadChange,
+  onMosaicOverlapChange
 }) => {
   return (
-    <div className="bg-gray-900 p-4 sm:p-6 rounded-lg">
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+    <div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Observation Date
@@ -146,6 +150,24 @@ export const FilterControls: React.FC<FilterControlsProps> = ({
           />
           <div className="text-xs text-gray-500 mt-1">
             Slew, plate-solve, and settle when moving to the next mosaic position
+          </div>
+        </div>
+        
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Mosaic Overlap: {mosaicOverlap}%
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="30"
+            step="5"
+            value={mosaicOverlap}
+            onChange={(e) => onMosaicOverlapChange(Number(e.target.value))}
+            className="w-full"
+          />
+          <div className="text-xs text-gray-500 mt-1">
+            How much neighboring mosaic frames overlap, for stitching. Sets each target's default grid.
           </div>
         </div>
       </div>
