@@ -603,8 +603,7 @@ export const ObservationPlanner: React.FC = () => {
             <div className="flex items-center space-x-2 sm:space-x-3">
               <div className="text-xl sm:text-2xl">🔭</div>
               <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                <span className="sm:hidden">Mt. Lemmon 32"</span>
-                <span className="hidden sm:inline">Mt. Lemmon Sky Center - 32" Telescope</span>
+                Schulman Telescope
               </h1>
             </div>
             
