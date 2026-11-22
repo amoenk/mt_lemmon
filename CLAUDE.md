@@ -22,20 +22,18 @@ npm run preview   # Preview production build locally
 
 ### Data Models
 - **Deep Sky Objects** (`src/data/deepSkyObjects.ts`): Catalog of galaxies, nebulae, and clusters with RA/Dec coordinates, magnitude, and observation priorities.
-- **Solar System Objects** (`src/data/solarSystemObjects.ts`): Planets and other solar system bodies with dynamic position calculation.
 
 ### Astronomy Utilities
 - **astronomy.ts** (`src/utils/astronomy.ts`): Core astronomical calculations using the astronomy-engine library:
   - Coordinate conversions (RA/Dec to Alt/Az)
   - Object visibility calculations
   - Moon phase calculations
-  - Planet position computations
   - Transit time predictions
 
 ### Key Constants
 - **Mt. Lemmon Location**: Latitude 32.4433°N, Longitude 110.7892°W, Elevation 2791m
-- **Default observation window**: 10 PM to 6 AM local time
-- **Minimum altitude threshold**: 30° above horizon (configurable)
+- **Default observation window**: astronomical dark for the selected date (Sun 18° below the horizon)
+- **Minimum altitude threshold**: 15° above horizon (configurable)
 
 ## Tech Stack
 - React 19 with TypeScript

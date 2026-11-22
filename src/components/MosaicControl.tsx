@@ -2,9 +2,9 @@ import React from 'react';
 import { mosaicCoverage, suggestedMosaic, type Mosaic, type PlannedObject } from '../utils/astronomy';
 import { PositiveNumberInput } from './PositiveNumberInput';
 
-// Mosaic grid details for a target, or null for targets without a catalog size (e.g. planets)
+// Mosaic grid details for a target, or null for targets without a catalog size
 const mosaicInfo = (obj: PlannedObject) => {
-  if (!obj.size || obj.type === 'planet') return null;
+  if (!obj.size) return null;
   const coverage = mosaicCoverage(obj.mosaic);
   return {
     size: obj.size,
@@ -21,7 +21,7 @@ const formatArcmin = (area: { width: number; height: number }) =>
 export const MosaicSummary: React.FC<{ obj: PlannedObject }> = ({ obj }) => {
   const info = mosaicInfo(obj);
   if (!info) {
-    return <span>{obj.size ? `${obj.size.width}'×${obj.size.height}'` : 'N/A'}</span>;
+    return <span>N/A</span>;
   }
   return (
     <div className="space-y-0.5">

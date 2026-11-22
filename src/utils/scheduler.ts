@@ -4,7 +4,6 @@ import {
   calculateAltitude,
   decToDecimal,
   filterSegments,
-  getPlanetPosition,
   targetMinutes,
   raToDecimal,
   MT_LEMMON_LOCATION,
@@ -40,12 +39,8 @@ export interface ScheduleOptions {
   positionOverhead: number;
 }
 
-// Altitude of a target at a moment, for both catalog objects and planets
+// Altitude of a target at a moment
 const altitudeAt = (obj: PlannedObject, time: Date): number => {
-  if (obj.type === 'planet') {
-    const position = getPlanetPosition(obj.name, time)!;
-    return calculateAltitude(position.ra, position.dec, time, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
-  }
   const catalog = deepSkyObjects.find(d => d.name === obj.name)!;
   return calculateAltitude(raToDecimal(catalog.ra), decToDecimal(catalog.dec), time, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
 };
@@ -138,11 +133,10 @@ export function scheduleNight(
   
   // Fill gaps: repeatedly add the one extra frame, across all targets, whose added time has the lowest
   // airmass, at the start or end of its block. Frames go to the plan's rows in proportion to their counts,
-  // and each row grows to at most twice its planned count. Planets (video capture) aren't extended.
+  // and each row grows to at most twice its planned count.
   for (;;) {
     let bestExtension: { block: typeof booked[number]; rows: FilterRow[]; start: number; end: number; cost: number } | null = null;
     for (const block of booked) {
-      if (block.obj.type === 'planet') continue;
       const plan = block.obj.filterRows;
       // Row that's furthest behind its share of extra frames
       const candidates = block.rows
@@ -184,10 +178,7 @@ export function scheduleNight(
         imagingTime: (b.end - b.start) / 60000,
         rows: b.rows,
         extraFrames: b.rows.reduce((sum, row, k) => sum + row.count - b.obj.filterRows[k].count, 0),
-        // Planets are video captures with no per-frame plan to break down
-        segments: b.obj.type === 'planet'
-          ? []
-          : filterSegments(b.rows, b.obj.mosaic, new Date(b.start), options.filterChangeTime, options.positionOverhead),
+        segments: filterSegments(b.rows, b.obj.mosaic, new Date(b.start), options.filterChangeTime, options.positionOverhead),
         meanAirmass: blockAltitudes.reduce((sum, alt) => sum + airmass(alt), 0) / blockAltitudes.length,
         altitudeRange: { min: Math.min(...blockAltitudes), max: Math.max(...blockAltitudes) }
       };

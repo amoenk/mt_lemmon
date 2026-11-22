@@ -1,13 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { deepSkyObjects } from '../data/deepSkyObjects';
-import { solarSystemObjects } from '../data/solarSystemObjects';
 import { 
   getMoonPhase, 
   calculateAltitude,
   raToDecimal,
   decToDecimal,
   MT_LEMMON_LOCATION,
-  getPlanetPosition,
   calculateObjectTimings,
   getExposureRecommendations,
   getSunTimes,
@@ -338,90 +336,7 @@ export const ObservationPlanner: React.FC = () => {
       };
     });
 
-    const planets = solarSystemObjects.filter(obj => obj.type === 'planet').map(planet => {
-      const position = getPlanetPosition(planet.name, observationDate);
-      
-      if (position) {
-        const timings = calculateObjectTimings(position.ra, position.dec, observationDate, minAltitude);
-        
-        // Calculate max altitude during observation window for planets
-        let maxAltitudeDuringWindow = 0;
-        const checkInterval = 15; // Check every 15 minutes
-        const totalMinutes = (observationEndDate.getTime() - observationDate.getTime()) / 60000;
-        const steps = Math.ceil(totalMinutes / checkInterval);
-        
-        for (let i = 0; i <= steps; i++) {
-          const checkTime = new Date(observationDate.getTime() + (i * checkInterval * 60000));
-          const planetPosAtTime = getPlanetPosition(planet.name, checkTime);
-          if (planetPosAtTime) {
-            const alt = calculateAltitude(planetPosAtTime.ra, planetPosAtTime.dec, checkTime, MT_LEMMON_LOCATION.longitude, MT_LEMMON_LOCATION.latitude);
-            if (alt > maxAltitudeDuringWindow) {
-              maxAltitudeDuringWindow = alt;
-            }
-          }
-        }
-        const exposure = getExposureRecommendations('planet');
-        
-        // Use custom settings if available
-        const objectCustomSettings = customSettings[planet.name];
-        const filterRows = objectCustomSettings?.filterRows ?? defaultFilterRows(exposure);
-        const activeFilters = [...new Set(filterRows.map(row => row.filter))];
-        
-        // Planets are captured as video: a fixed capture time per filter
-        const captureTime = 10;
-        const totalObservationTime = captureTime * filterRows.length;
-        
-        const isVisible = timings.transitAltitude >= minAltitude;
-        
-        const priorityMap: { [key: string]: number } = {
-          'must_have': 10,
-          'high': 8,
-          'medium': 5,
-          'low': 3
-        };
-        const defaultPriority = priorityMap[planet.priority] || 5;
-        const priorityValue = objectCustomSettings?.priority || defaultPriority;
-        
-        let observationScore = 0;
-        if (isVisible && timings.transitTime) {
-          const minutesFromTransit = Math.abs(timings.transitTime.getTime() - observationDate.getTime()) / (1000 * 60);
-          const timeScore = Math.max(0, 100 - (minutesFromTransit / 60) * 10);
-          const altScore = Math.min(100, (timings.transitAltitude / 90) * 100);
-          const flexibilityScore = 100 - Math.min(80, totalObservationTime * 0.5);
-          
-          observationScore = ((timeScore * 0.4 + altScore * 0.3 + flexibilityScore * 0.3) * (priorityValue / 5));
-        }
-        
-        const observableDuration = timings.setTime && timings.riseTime 
-          ? (timings.setTime.getTime() - timings.riseTime.getTime()) / 60000
-          : 0;
-        
-        return {
-          id: planet.name,
-          name: planet.name,
-          type: 'planet',
-          priority: priorityValue,
-          defaultPriority,
-          size: undefined,
-          currentAltitude: position.altitude,
-          timings,
-          maxAltitudeDuringWindow,
-          exposure,
-          activeFilters,
-          filterRows,
-          mosaic: SINGLE_POSITION,
-          isVisible,
-          totalObservationTime,
-          observationScore,
-          observableDuration
-        };
-      }
-      return null;
-    }).filter((item): item is NonNullable<typeof item> => item !== null);
-
-    const combined = [...deepSky, ...planets];
-    
-    return combined.sort((a, b) => {
+    return deepSky.sort((a, b) => {
       // First, separate visible from non-visible
       if (a.isVisible !== b.isVisible) {
         return a.isVisible ? -1 : 1;

@@ -380,17 +380,6 @@ export function getMagnificationRecommendation(
   
   const maxDimension = Math.max(size.width, size.height); // arcminutes
   
-  // For planets, use high magnification
-  if (objectType === 'planet') {
-    // Planets are tiny (< 1 arcmin)
-    return {
-      magnification: 'High (300-500x)',
-      eyepiece: '8-13mm',
-      fov: '~0.15°',
-      notes: 'Use highest power seeing permits. Barlow recommended.'
-    };
-  }
-  
   // For extended objects, choose based on size
   if (maxDimension > 120) {
     // Very large objects (> 2 degrees)
@@ -470,12 +459,6 @@ export function getExposureRecommendations(
       return {
         rows: [row('Luminance', 10, 60)],
         notes: 'Short frames for bright stars.'
-      };
-    
-    case 'planet':
-      return {
-        rows: [row('Luminance', 1, 1)],
-        notes: 'High frame rate video capture. Add filters for detail.'
       };
     
     default:
@@ -599,35 +582,6 @@ export function getMoonUpPeriods(from: Date, to: Date): MoonUpPeriod[] {
   return periods;
 }
 
-export function getPlanetPosition(planet: string, date: Date): { ra: number; dec: number; altitude: number; azimuth: number } | null {
-  // Convert planet name to Body enum value
-  let bodyName = planet;
-  if (planet === 'Uranus') bodyName = 'Uranus';
-  if (planet === 'Neptune') bodyName = 'Neptune';
-  if (planet === 'Jupiter') bodyName = 'Jupiter';
-  if (planet === 'Saturn') bodyName = 'Saturn';
-  if (planet === 'Mars') bodyName = 'Mars';
-  
-  const planetBody = Astronomy.Body[bodyName as keyof typeof Astronomy.Body];
-  if (planetBody === undefined) return null;
-  
-  const time = new Astronomy.AstroTime(date);
-  const observer = new Astronomy.Observer(
-    MT_LEMMON_LOCATION.latitude,
-    MT_LEMMON_LOCATION.longitude,
-    MT_LEMMON_LOCATION.elevation
-  );
-  
-  const equ = Astronomy.Equator(planetBody, time, observer, false, true);
-  const hor = Astronomy.Horizon(time, observer, equ.ra, equ.dec, 'normal');
-  
-  return {
-    ra: equ.ra,
-    dec: equ.dec,
-    altitude: hor.altitude,
-    azimuth: hor.azimuth
-  };
-}
 export interface SunTimes {
   sunset: Date;
   astroDusk: Date; // Sun reaches -18°: astronomical dark begins

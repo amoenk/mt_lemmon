@@ -232,9 +232,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                           <div className="space-y-1 text-sm">
                             <div>
                               <span className="text-gray-400">Filter Plan:</span>{' '}
-                              {obj.type === 'planet'
-                                ? obj.filterRows.map(row => row.filter).join(' → ')
-                                : obj.filterRows.map(row => `${row.filter} ${row.count}×${row.exposure}s${row.binning > 1 ? ` ${row.binning}×${row.binning}` : ''}`).join(' → ')}
+                              {obj.filterRows.map(row => `${row.filter} ${row.count}×${row.exposure}s${row.binning > 1 ? ` ${row.binning}×${row.binning}` : ''}`).join(' → ')}
                             </div>
                             <div className="text-xs text-gray-500 mt-2">
                               {exposure.notes}
@@ -512,9 +510,7 @@ export const ObservationTable: React.FC<ObservationTableProps> = ({
                               <div className="space-y-1 text-sm">
                                 <div>
                                   <span className="text-gray-400">Filter Plan:</span>{' '}
-                                  {obj.type === 'planet'
-                                ? obj.filterRows.map(row => row.filter).join(' → ')
-                                : obj.filterRows.map(row => `${row.filter} ${row.count}×${row.exposure}s${row.binning > 1 ? ` ${row.binning}×${row.binning}` : ''}`).join(' → ')}
+                                  {obj.filterRows.map(row => `${row.filter} ${row.count}×${row.exposure}s${row.binning > 1 ? ` ${row.binning}×${row.binning}` : ''}`).join(' → ')}
                                 </div>
                                 <div className="text-xs text-gray-500 mt-2">
                                   {exposure.notes}
