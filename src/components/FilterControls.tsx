@@ -34,8 +34,8 @@ export const FilterControls: React.FC<FilterControlsProps> = ({
   onPositionOverheadChange
 }) => {
   return (
-    <div className="bg-gray-900 p-4 sm:p-6 rounded-lg">
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+    <div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
             Observation Date

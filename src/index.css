@@ -26,36 +26,6 @@
   }
 }
 
-/* Simple layout classes */
-.container-content {
-  max-width: 80rem;
-  margin: 0 auto;
-  padding: 1rem;
-}
-
-@media (min-width: 640px) {
-  .container-content {
-    padding: 1.5rem;
-  }
-}
-
-@media (min-width: 1024px) {
-  .container-content {
-    padding: 2rem;
-  }
-}
-
-.main-content {
-  max-width: 80rem;
-  margin: 0 auto;
-  padding-top: 2rem;
-  padding-bottom: 2rem;
-}
-
-.main-content > * {
-  margin-bottom: 2rem;
-}
-
 /* Gantt chart section - full width on mobile */
 .gantt-section {
   padding: 0;

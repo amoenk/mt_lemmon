@@ -17,7 +17,7 @@ import {
   type CustomObjectSettings
 } from '../utils/astronomy';
 import { SimpleGanttChart } from './SimpleGanttChart';
-import { FilterControls } from './FilterControls';
+import { SettingsDialog } from './SettingsDialog';
 import { ObservationTable } from './ObservationTable';
 import { encodeShare, decodeShare } from '../utils/shareCode';
 import { scheduleNight } from '../utils/scheduler';
@@ -25,6 +25,10 @@ import { scheduleNight } from '../utils/scheduler';
 const DEFAULT_OBSERVATION_DATE = '2027-01-09';
 const DEFAULT_FILTER_CHANGE_MINUTES = 1;
 const DEFAULT_POSITION_OVERHEAD_MINUTES = 2;
+const DESKTOP_QUERY = '(min-width: 1024px)';
+const DEFAULT_TARGETS_PANEL_WIDTH = 440;
+const MIN_TARGETS_PANEL_WIDTH = 320;
+const MAX_TARGETS_PANEL_FRACTION = 0.6;
 export const ObservationPlanner: React.FC = () => {
   // Check URL params first, then localStorage, then defaults
   const loadSettingWithUrlParam = <T,>(key: string, urlParam: string, defaultValue: T): T => {
@@ -385,6 +389,49 @@ export const ObservationPlanner: React.FC = () => {
     setDisabledObjects(newDisabled);
   };
 
+  // Layout: settings dialog and the targets panel (right column on desktop, full-screen overlay below 1024px)
+  const [showSettings, setShowSettings] = useState(false);
+  const [mobileTargetsOpen, setMobileTargetsOpen] = useState(false);
+  const [targetsPanelOpen, setTargetsPanelOpen] = useState<boolean>(() =>
+    JSON.parse(localStorage.getItem('targetsPanelOpen') ?? 'true')
+  );
+  const [targetsPanelWidth, setTargetsPanelWidth] = useState<number>(() =>
+    JSON.parse(localStorage.getItem('targetsPanelWidth') ?? String(DEFAULT_TARGETS_PANEL_WIDTH))
+  );
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
+
+  useEffect(() => {
+    const query = window.matchMedia(DESKTOP_QUERY);
+    const onChange = () => setIsDesktop(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('targetsPanelOpen', JSON.stringify(targetsPanelOpen));
+  }, [targetsPanelOpen]);
+
+  useEffect(() => {
+    localStorage.setItem('targetsPanelWidth', JSON.stringify(targetsPanelWidth));
+  }, [targetsPanelWidth]);
+
+  // Drag the handle to resize: the panel sits at the right edge, so its width is the distance from the pointer to the edge
+  const startPanelResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const onMove = (move: PointerEvent) => {
+      const maxWidth = window.innerWidth * MAX_TARGETS_PANEL_FRACTION;
+      setTargetsPanelWidth(Math.round(Math.min(maxWidth, Math.max(MIN_TARGETS_PANEL_WIDTH, window.innerWidth - move.clientX))));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      document.body.style.userSelect = '';
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
   const updateObjectSettings = (objectId: string, settings: CustomObjectSettings) => {
     setCustomSettings(prev => ({
       ...prev,
@@ -489,10 +536,10 @@ export const ObservationPlanner: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 overflow-x-hidden">
-      <header className="bg-black/50 backdrop-blur-sm border-b border-gray-800">
-        <div className="container-content">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="h-screen flex flex-col bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950 overflow-hidden">
+      <header className="shrink-0 bg-black/50 backdrop-blur-sm border-b border-gray-800">
+        <div className="px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center space-x-2 sm:space-x-3">
               <div className="text-xl sm:text-2xl">🔭</div>
               <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
@@ -501,7 +548,23 @@ export const ObservationPlanner: React.FC = () => {
               </h1>
             </div>
             
-            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <button
+                onClick={() => (isDesktop ? setTargetsPanelOpen(!targetsPanelOpen) : setMobileTargetsOpen(true))}
+                className={`flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 ${isDesktop && targetsPanelOpen ? 'ring-1 ring-blue-500/60' : ''}`}
+                title={isDesktop ? (targetsPanelOpen ? 'Hide the targets panel' : 'Show the targets panel') : 'Show targets'}
+              >
+                <span className="text-sm sm:text-base">📋</span>
+                <span className="text-xs sm:text-sm font-medium">Targets ({visibleObjects.length})</span>
+              </button>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
+                title="Date, times and settings"
+              >
+                <span className="text-sm sm:text-base">⚙</span>
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Settings</span>
+              </button>
               <button
                 onClick={handleExport}
                 className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
@@ -517,14 +580,6 @@ export const ObservationPlanner: React.FC = () => {
               >
                 <span className="text-sm sm:text-base">📥</span>
                 <span className="text-xs sm:text-sm font-medium hidden sm:inline">Import</span>
-              </button>
-              <button
-                onClick={resetSettings}
-                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-2 rounded-lg transition-all bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700"
-                title="Reset all settings to defaults"
-              >
-                <span className="text-sm sm:text-base">↺</span>
-                <span className="text-xs sm:text-sm font-medium hidden sm:inline">Reset</span>
               </button>
               <button
                 onClick={() => setIsNightMode(!isNightMode)}
@@ -545,27 +600,123 @@ export const ObservationPlanner: React.FC = () => {
         </div>
       </header>
 
-      <div className="main-content">
-        {/* Gantt Chart - Full width on mobile */}
-        {visibleObjects.length > 0 && (
-          <div className="gantt-section">
-            <SimpleGanttChart
-              observations={visibleObjects}
-              moonPhase={moonInfo}
-              startTime={observationDate}
-              endTime={observationEndDate}
-              sunTimes={sunTimes}
-              isSyncedToDark={isSyncedToDark}
-              onSyncToDark={() => syncToDarkWindow(selectedDate)}
-              expandedRows={expandedRows}
-              scheduledObservations={scheduledObservations}
-            />
+      <div className="flex flex-1 min-h-0">
+        {/* Main column: timeline and conditions, scrolls on its own */}
+        <main className="flex-1 min-w-0 overflow-y-auto py-4 sm:py-6 space-y-6">
+          {visibleObjects.length > 0 ? (
+            <div className="gantt-section">
+              <SimpleGanttChart
+                observations={visibleObjects}
+                moonPhase={moonInfo}
+                startTime={observationDate}
+                endTime={observationEndDate}
+                sunTimes={sunTimes}
+                isSyncedToDark={isSyncedToDark}
+                onSyncToDark={() => syncToDarkWindow(selectedDate)}
+                expandedRows={expandedRows}
+                scheduledObservations={scheduledObservations}
+              />
+            </div>
+          ) : (
+            <div className="px-4 sm:px-6 lg:px-8 text-gray-400">
+              No targets are visible and enabled for this night. Open Targets to enable some, or Settings to change the date or window.
+            </div>
+          )}
+
+          {/* Conditions Info */}
+          <div className="px-4 sm:px-6 lg:px-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="bg-gray-900 p-4 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <span className="text-2xl">📍</span>
+                  <h3 className="font-semibold">Location</h3>
+                </div>
+                <p className="text-sm text-gray-400">Mt. Lemmon Sky Center</p>
+                <p className="text-xs text-gray-500">32.44°N, 110.79°W • 2,791m</p>
+                <p className="text-xs text-gray-500">MST (UTC-7, no DST)</p>
+              </div>
+              
+              <div className="bg-gray-900 p-4 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <span className="text-2xl">🌙</span>
+                  <h3 className="font-semibold">Moon Phase</h3>
+                </div>
+                <p className="text-sm text-gray-400">{moonInfo.phase}</p>
+                <p className="text-xs text-gray-500">{moonInfo.illumination.toFixed(0)}% illuminated</p>
+              </div>
+              
+              <div className="bg-gray-900 p-4 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <span className="text-2xl">✨</span>
+                  <h3 className="font-semibold">Observable</h3>
+                </div>
+                <p className="text-2xl font-bold text-blue-400">{visibleObjects.length}</p>
+                <p className="text-xs text-gray-500">
+                  of {allObjects.length} objects visible
+                </p>
+              </div>
+            </div>
           </div>
+        </main>
+
+        {/* Drag handle to resize the targets panel (desktop) */}
+        {isDesktop && targetsPanelOpen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize targets panel"
+            onPointerDown={startPanelResize}
+            className="w-1.5 shrink-0 cursor-col-resize bg-gray-800 hover:bg-blue-500/60 active:bg-blue-500"
+          />
         )}
 
-        {/* Filter Controls */}
-        <div className="container-content">
-          <FilterControls
+        {/* Targets panel: right-side column on desktop, full-screen overlay on smaller screens */}
+        {(isDesktop ? targetsPanelOpen : mobileTargetsOpen) && (
+          <aside
+            className={isDesktop
+              ? 'shrink-0 flex flex-col min-h-0 bg-gray-950'
+              : 'fixed inset-0 z-40 flex flex-col bg-gray-950'}
+            style={isDesktop ? { width: targetsPanelWidth } : undefined}
+          >
+            <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-800">
+              {isDesktop ? (
+                <h2 className="font-bold">Targets <span className="font-normal text-gray-400">· {visibleObjects.length} of {allObjects.length} enabled and visible</span></h2>
+              ) : (
+                <button onClick={() => setMobileTargetsOpen(false)} className="text-blue-400 hover:text-blue-300 font-medium">
+                  ← Back
+                </button>
+              )}
+              {isDesktop ? (
+                <button
+                  onClick={() => setTargetsPanelOpen(false)}
+                  className="text-gray-400 hover:text-white text-sm px-2"
+                  title="Hide the targets panel"
+                >
+                  Hide →
+                </button>
+              ) : (
+                <h2 className="font-bold">Targets <span className="font-normal text-gray-400">· {visibleObjects.length}</span></h2>
+              )}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <ObservationTable
+                observations={allObjects}
+                expandedRows={expandedRows}
+                scheduledObservations={scheduledObservations}
+                unscheduledReasons={unscheduledReasons}
+                disabledObjects={disabledObjects}
+                customSettings={customSettings}
+                onToggleExpanded={toggleExpanded}
+                onToggleEnabled={toggleObjectEnabled}
+                onUpdateSettings={updateObjectSettings}
+              />
+            </div>
+          </aside>
+        )}
+      </div>
+
+      {showSettings && (
+        <SettingsDialog
           observationDate={selectedDate}
           startTime={startTime}
           endTime={endTime}
@@ -580,59 +731,12 @@ export const ObservationPlanner: React.FC = () => {
           onSetupTimeChange={setSetupTime}
           onFilterChangeTimeChange={setFilterChangeTime}
           onPositionOverheadChange={setPositionOverhead}
-          />
-        </div>
-
-        {/* Conditions Info */}
-        <div className="container-content">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          <div className="bg-gray-900 p-4 rounded-lg">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-2xl">📍</span>
-              <h3 className="font-semibold">Location</h3>
-            </div>
-            <p className="text-sm text-gray-400">Mt. Lemmon Sky Center</p>
-            <p className="text-xs text-gray-500">32.44°N, 110.79°W • 2,791m</p>
-            <p className="text-xs text-gray-500">MST (UTC-7, no DST)</p>
-          </div>
-          
-          <div className="bg-gray-900 p-4 rounded-lg">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-2xl">🌙</span>
-              <h3 className="font-semibold">Moon Phase</h3>
-            </div>
-            <p className="text-sm text-gray-400">{moonInfo.phase}</p>
-            <p className="text-xs text-gray-500">{moonInfo.illumination.toFixed(0)}% illuminated</p>
-          </div>
-          
-          <div className="bg-gray-900 p-4 rounded-lg">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-2xl">✨</span>
-              <h3 className="font-semibold">Observable</h3>
-            </div>
-            <p className="text-2xl font-bold text-blue-400">{visibleObjects.length}</p>
-            <p className="text-xs text-gray-500">
-              of {allObjects.length} objects visible
-            </p>
-          </div>
-          </div>
-        </div>
-
-        {/* Observation Table */}
-        <div className="container-content">
-          <ObservationTable
-          observations={allObjects}
-          expandedRows={expandedRows}
-          scheduledObservations={scheduledObservations}
-          unscheduledReasons={unscheduledReasons}
-          disabledObjects={disabledObjects}
-          customSettings={customSettings}
-          onToggleExpanded={toggleExpanded}
-          onToggleEnabled={toggleObjectEnabled}
-          onUpdateSettings={updateObjectSettings}
+          isSyncedToDark={isSyncedToDark}
+          onSyncToDark={() => syncToDarkWindow(selectedDate)}
+          onReset={resetSettings}
+          onClose={() => setShowSettings(false)}
         />
-        </div>
-      </div>
+      )}
 
       {/* Export Modal */}
       {showExportModal && (
